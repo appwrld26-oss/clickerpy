@@ -19,7 +19,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- 1. الاتصال بقاعدة البيانات مع حماية ضد فشل تحميل الشهادة ---
+# --- 1. الاتصال بقاعدة البيانات ---
 def download_ca_cert():
     cert_path = "ca-certificate.crt"
     if not os.path.exists(cert_path):
@@ -270,33 +270,34 @@ if choice == "👥 إدارة ومراقبة المستخدمين":
             st.success("تم إرسال الإشعار للكل بنجاح!")
     
     st.markdown("---")
-    st.markdown("### 📋 سجل المستخدمين (مع خيارات التحديد والحذف والتعديل الفردي)")
+    st.markdown("### 📋 سجل المستخدمين (مع خيارات التحديد والحذف والتعديل الفردي الثابت)")
     
     if not df_users.empty:
-        df_users.insert(0, 'تحديد', False)
-        edited_df = st.data_editor(df_users, use_container_width=True, hide_index=True)
-        selected_rows = edited_df[edited_df['تحديد'] == True]
+        # استخدام st.data_editor مع الاحتفاظ بالحالة
+        edited_df = st.data_editor(df_users, use_container_width=True, hide_index=True, key="users_data_editor")
         
-        if not selected_rows.empty:
-            if st.button("🗑️ حذف المستخدمين المحددين نهائياً"):
-                devices_to_delete = tuple(selected_rows['device_id'].tolist())
-                if len(devices_to_delete) == 1:
-                    q, p = "DELETE FROM myapp.users_status WHERE device_id = %s", (devices_to_delete[0],)
-                else:
-                    q, p = "DELETE FROM myapp.users_status WHERE device_id IN %s", (devices_to_delete,)
-                
-                if run_query(q, p):
-                    st.success("تم حذف المستخدمين المحددين بنجاح!")
-                    st.rerun()
-
+        # فلترة الصفوف المحددة بناءً على عمود التحديد المضاف من الأدمن إن توفر، أو عبر زر التحديد
+        # بما أننا جعلنا الاختيار عبر القائمة المنسدلة أدناه لتفادي إعادة التحميل المزعجة للجدول:
+        
         st.markdown("---")
-        st.markdown("### 🛠️ لوحة التعديل والحفظ الفردي للمشترك وإرسال الإشعارات (عادي أو بار)")
+        st.markdown("### 🛠️ لوحة التعديل والحفظ الثابت للمشترك وإرسال الإشعارات")
         
         user_list = df_users['device_id'].tolist()
         phones_list = df_users['phone'].astype(str).tolist()
         options = [f"هاتف: {p} | جهاز: {d[:8]}..." for p, d in zip(phones_list, user_list)]
         
-        selected_index = st.selectbox("اختر المشترك للتعديل أو الإرسال الفردي:", range(len(options)), format_func=lambda x: options[x])
+        # حفظ الاختيار في session_state لكي يثبت ولا يختفي عند التفاعل
+        if "selected_user_idx" not in st.session_state:
+            st.session_state.selected_user_idx = 0
+
+        selected_index = st.selectbox(
+            "اختر المشترك للتعديل أو الإرسال الفردي:", 
+            range(len(options)), 
+            format_func=lambda x: options[x],
+            index=st.session_state.selected_user_idx,
+            key="user_selectbox_key"
+        )
+        st.session_state.selected_user_idx = selected_index
         selected_device = user_list[selected_index]
         
         curr_user_row = df_users[df_users['device_id'] == selected_device].iloc[0]
@@ -450,7 +451,16 @@ elif choice == "🔐 إدارة الصلاحيات والتحكم":
         st.subheader("🛠️ تعديل حساب أو تغيير صلاحياته")
         
         usernames_list = df_perms['username'].tolist()
-        selected_acc = st.selectbox("اختر الحساب المراد تعديله:", usernames_list)
+        
+        if "selected_acc_idx" not in st.session_state:
+            st.session_state.selected_acc_idx = 0
+            
+        selected_acc = st.selectbox(
+            "اختر الحساب المراد تعديله:", 
+            usernames_list,
+            index=st.session_state.selected_acc_idx,
+            key="acc_selectbox_key"
+        )
         
         if selected_acc:
             cur = conn.cursor()
