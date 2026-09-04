@@ -77,7 +77,7 @@ def setup_tables():
                 is_active BOOLEAN DEFAULT TRUE
             );
         """)
-        # جدول إعدادات التطبيق (التحديث الإجباري والتحميل)
+        # جدول إعدادات التطبيق (التحديث الإجباري)
         cur.execute("""
             CREATE TABLE IF NOT EXISTS myapp.app_config (
                 id SERIAL PRIMARY KEY,
@@ -180,32 +180,25 @@ if choice == "👥 إدارة ومراقبة المستخدمين":
     st.dataframe(df, use_container_width=True)
 
 elif choice == "🚀 إدارة التحديثات الإجبارية":
-    st.title("🚀 إدارة التحديثات الإجبارية ورابط التحميل المباشر")
-    st.warning("تحذير: تفعيل الإيقاف الإجباري سيجبر المستخدمين على تحميل النسخة الجديدة لتجاوز شاشة التحديث.")
+    st.title("🚀 إدارة التحديثات الإجبارية (Force Update)")
+    st.warning("تحذير: تفعيل هذا الخيار سيمنع المستخدمين من استخدام النسخ القديمة حتى يقوموا بالتحديث.")
     
     config = pd.read_sql("SELECT * FROM myapp.app_config WHERE id = 1", conn).iloc[0]
     
     with st.form("update_form"):
         new_ver = st.text_input("رقم الإصدار الأحدث (مثل 7.2.0):", value=config['latest_version'])
-        new_url = st.text_input("رابط تحميل الـ APK المباشر (مثل رابط ميديافاير أو سيرفر خارجي):", value=config['update_url'])
-        new_msg = st.text_area("رسالة التنبيه للمستخدم عند التحديث:", value=config['update_message'])
+        new_url = st.text_input("رابط تحميل الـ APK المباشر:", value=config['update_url'])
+        new_msg = st.text_area("رسالة التنبيه للمستخدم:", value=config['update_message'])
         is_forced = st.checkbox("تفعيل الإيقاف الإجباري للنسخ القديمة", value=config['force_update_enabled'])
         
-        if st.form_submit_button("حفظ وتحديث بيانات الإصدار 💾"):
+        if st.form_submit_button("حفظ الإعدادات 💾"):
             if run_query("""
                 UPDATE myapp.app_config 
                 SET latest_version=%s, update_url=%s, update_message=%s, force_update_enabled=%s 
                 WHERE id = 1
             """, (new_ver, new_url, new_msg, is_forced)):
-                st.success("تم حفظ إعدادات التحديث الإجباري ورابط التحميل بنجاح!")
+                st.success("تم الحفظ بنجاح")
                 st.rerun()
-                
-    st.markdown("---")
-    st.markdown("### 📥 معاينة رابط التحميل الحالي المتاح للمستخدمين:")
-    if config['update_url']:
-        st.markdown(f"🔗 **[اضغط هنا لتحميل النسخة الأحدث مباشرة ({config['latest_version']})]({config['update_url']})**")
-    else:
-        st.info("لم يتم تعيين رابط تحميل مباشر للنسخة بعد.")
 
 elif choice == "🎫 توليد وإدارة الأكواد (الادمن)":
     st.title("🎫 توليد الأكواد")
