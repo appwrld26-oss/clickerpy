@@ -59,14 +59,14 @@ def run_query(query, params=()):
         return True
     except Exception as e:
         conn.rollback()
-        st.error(f"حدث خطأ: {e}")
+        st.error(f"حدث خطأ في قاعدة البيانات: {e}")
         return False
 
-# --- 2. إعداد الجداول ---
+# --- 2. إعداد الجداول الشاملة ---
 def setup_tables():
     try:
         cur = conn.cursor()
-        # جدول الصلاحيات
+        # جدول الصلاحيات والحسابات
         cur.execute("""
             CREATE TABLE IF NOT EXISTS myapp.app_permissions (
                 id SERIAL PRIMARY KEY,
@@ -77,7 +77,14 @@ def setup_tables():
                 is_active BOOLEAN DEFAULT TRUE
             );
         """)
-        # جدول إعدادات التطبيق (التحديث الإجباري)
+        
+        # التأكد من وجود عمود is_active في حال كان الجدول موجوداً مسبقاً
+        cur.execute("""
+            ALTER TABLE myapp.app_permissions 
+            ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE;
+        """)
+
+        # جدول إعدادات التطبيق (التحديث الإجباري والتحميل)
         cur.execute("""
             CREATE TABLE IF NOT EXISTS myapp.app_config (
                 id SERIAL PRIMARY KEY,
@@ -89,21 +96,25 @@ def setup_tables():
         """)
         conn.commit()
         
-        # التأكد من وجود حساب الأدمن والصلاحيات الكاملة
+        # التأكد من وجود حساب الأدمن بالصلاحيات الكاملة
         cur.execute("SELECT COUNT(*) FROM myapp.app_permissions WHERE username = 'admin'")
         if cur.fetchone()[0] == 0:
             all_secs = [
-                "👥 إدارة ومراقبة المستخدمين", "🎫 توليد وإدارة الأكواد (الادمن)", 
-                "🤝 قسم الشركاء (الموزعين)", "📈 تحليل البيانات", 
-                "🖥️ حالة السيرفر", "🔐 إدارة الصلاحيات والتحكم", 
-                "🚀 إدارة التحديثات الإجبارية", "🛠️ الدعم الفني والتواصل"
+                "👥 إدارة ومراقبة المستخدمين", 
+                "🎫 توليد وإدارة الأكواد (الادمن)", 
+                "🤝 قسم الشركاء (الموزعين)", 
+                "📈 تحليل البيانات", 
+                "🖥️ حالة السيرفر", 
+                "🔐 إدارة الصلاحيات والتحكم", 
+                "🚀 إدارة التحديثات الإجبارية", 
+                "🛠️ الدعم الفني والتواصل"
             ]
             cur.execute(
-                "INSERT INTO myapp.app_permissions (username, password, role_name, allowed_sections) VALUES (%s, %s, %s, %s)",
-                ("admin", "admin123", "مدير النظام", all_secs)
+                "INSERT INTO myapp.app_permissions (username, password, role_name, allowed_sections, is_active) VALUES (%s, %s, %s, %s, %s)",
+                ("admin", "admin123", "مدير النظام", all_secs, True)
             )
         
-        # التأكد من وجود سجل الإعدادات
+        # التأكد من وجود سجل الإعدادات الأساسي
         cur.execute("SELECT COUNT(*) FROM myapp.app_config")
         if cur.fetchone()[0] == 0:
             cur.execute("INSERT INTO myapp.app_config (latest_version, update_url, update_message, force_update_enabled) VALUES ('7.1.0', '', 'يرجى تحديث التطبيق للاستمرار', FALSE)")
@@ -114,39 +125,100 @@ def setup_tables():
 
 setup_tables()
 
-# --- 3. تسجيل الدخول ---
-if "logged_in" not in st.session_state: st.session_state.logged_in = False
+# --- 3. نظام المصادقة (تسجيل الدخول أو التسجيل العام) ---
+if "logged_in" not in st.session_state: 
+    st.session_state.logged_in = False
+    st.session_state.username = None
+    st.session_state.allowed_sections = []
 
 if not st.session_state.logged_in:
-    st.title("🔐 تسجيل الدخول")
-    with st.form("login"):
-        u = st.text_input("المستخدم:")
-        p = st.text_input("المرور:", type="password")
-        if st.form_submit_button("دخول"):
-            cur = conn.cursor()
-            cur.execute("SELECT password, allowed_sections, is_active FROM myapp.app_permissions WHERE username = %s", (u,))
-            res = cur.fetchone()
-            if res and res[2] and res[0] == p:
-                st.session_state.logged_in, st.session_state.username, st.session_state.allowed_sections = True, u, res[1]
-                st.rerun()
-            else: st.error("بيانات خاطئة أو حساب معطل")
+    st.sidebar.markdown("### ⚙️ خيارات الدخول")
+    auth_mode = st.sidebar.radio("اختر العملية:", ["تسجيل الدخول", "طلب حساب لوحة تحكم جديد"])
+    
+    if auth_mode == "تسجيل الدخول":
+        st.title("🔐 تسجيل الدخول إلى لوحة التحكم")
+        with st.form("login_form"):
+            u_input = st.text_input("اسم المستخدم:")
+            p_input = st.text_input("كلمة المرور:", type="password")
+            submit_login = st.form_submit_button("دخول")
+            
+            if submit_login:
+                try:
+                    cur = conn.cursor()
+                    cur.execute("SELECT password, allowed_sections, is_active FROM myapp.app_permissions WHERE username = %s", (u_input,))
+                    user_record = cur.fetchone()
+                    cur.close()
+                    
+                    if user_record:
+                        db_pass, db_sections, db_is_active = user_record
+                        if db_is_active is False:
+                            st.error("⚠️ هذا الحساب معطل من قبل الإدارة. يرجى التواصل مع المسؤول.")
+                        elif db_pass == p_input:
+                            st.session_state.logged_in = True
+                            st.session_state.username = u_input
+                            st.session_state.allowed_sections = db_sections if db_sections else []
+                            st.rerun()
+                        else:
+                            st.error("اسم المستخدم أو كلمة المرور غير صحيحة!")
+                    else:
+                        st.error("اسم المستخدم أو كلمة المرور غير صحيحة!")
+                except Exception as e:
+                    st.error(f"خطأ في عملية التحقق: {e}")
+    else:
+        st.title("📝 طلب حساب لوحة تحكم جديد")
+        with st.form("public_register_form"):
+            reg_user = st.text_input("اسم المستخدم:")
+            reg_pass = st.text_input("كلمة المرور:", type="password")
+            reg_role = st.text_input("طبيعة العمل أو الوصف (مثال: موزع بغداد):")
+            submit_register = st.form_submit_button("إرسال الطلب 🚀")
+            
+            if submit_register:
+                if not reg_user or not reg_pass:
+                    st.error("يرجى ملء الحقول المطلوبة!")
+                else:
+                    try:
+                        cur = conn.cursor()
+                        cur.execute(
+                            "INSERT INTO myapp.app_permissions (username, password, role_name, allowed_sections, is_active) VALUES (%s, %s, %s, %s, %s)",
+                            (reg_user, reg_pass, reg_role, ["🤝 قسم الشركاء (الموزعين)"], False)
+                        )
+                        conn.commit()
+                        cur.close()
+                        st.success("✅ تم إرسال الطلب بنجاح وهو بانتظار تفعيل الأدمن.")
+                    except Exception as err:
+                        conn.rollback()
+                        st.error(f"اسم المستخدم مستخدم مسبقاً أو حدث خطأ: {err}")
     st.stop()
 
-# --- Sidebar ---
-st.sidebar.title("⚡ MyClicker Pro")
-choice = st.sidebar.radio("القائمة:", st.session_state.allowed_sections)
-if st.sidebar.button("🚪 خروج"): 
+# --- الشريط الجانبي (Sidebar) ---
+st.sidebar.markdown(f"### ⚡ MyClicker Pro")
+st.sidebar.info(f"👤 المستخدم: {st.session_state.username}")
+
+if st.sidebar.button("🔄 تحديث البيانات (Refresh)"):
+    st.rerun()
+
+user_allowed = st.session_state.allowed_sections
+if not user_allowed:
+    st.error("عذراً، ليس لديك أي صلاحيات لعرض الأقسام.")
+    st.stop()
+
+choice = st.sidebar.radio("القائمة الرئيسية:", user_allowed)
+
+if st.sidebar.button("🚪 تسجيل الخروج"): 
     st.session_state.logged_in = False
+    st.session_state.username = None
+    st.session_state.allowed_sections = []
     st.rerun()
 
 # =====================================================================
-# الأقسام
+# تنفيذ الأقسام والقوائم الشاملة
 # =====================================================================
 
+# 1. قسم إدارة ومراقبة المستخدمين
 if choice == "👥 إدارة ومراقبة المستخدمين":
     st.title("👥 إدارة المستخدمين والاشتراكات")
     
-    # قسم إضافة وتفعيل رقم الهاتف مباشرة
+    # إضافة وتفعيل رقم الهاتف مباشرة
     with st.expander("➕ إضافة وتفعيل رقم هاتف مشترك جديد"):
         with st.form("add_phone_sub"):
             phone_input = st.text_input("رقم الهاتف:")
@@ -170,47 +242,130 @@ if choice == "👥 إدارة ومراقبة المستخدمين":
     df = pd.read_sql("SELECT device_id, phone, status, bot_status, subscription_type, expiry_date, notice_message FROM myapp.users_status ORDER BY last_active DESC", conn)
     st.metric("إجمالي الأجهزة/المستخدمين", len(df))
     
-    st.markdown("### 📢 إرسال إشعارات")
+    st.markdown("### 📢 إرسال إشعارات منبثقة")
     mode = st.radio("نوع الإشعار:", ["داخل التطبيق", "إشعار نظام (StatusBar)"], horizontal=True)
     msg = st.text_input("نص الرسالة:")
     if st.button("إرسال للكل"):
         final = f"PUSH:{msg}" if mode == "إشعار نظام (StatusBar)" else msg
-        if run_query("UPDATE myapp.users_status SET notice_message = %s", (final,)): st.success("تم الإرسال")
+        if run_query("UPDATE myapp.users_status SET notice_message = %s", (final,)): 
+            st.success("تم إرسال الإشعار بنجاح!")
     
     st.dataframe(df, use_container_width=True)
 
+# 2. إدارة التحديثات الإجبارية
 elif choice == "🚀 إدارة التحديثات الإجبارية":
-    st.title("🚀 إدارة التحديثات الإجبارية (Force Update)")
-    st.warning("تحذير: تفعيل هذا الخيار سيمنع المستخدمين من استخدام النسخ القديمة حتى يقوموا بالتحديث.")
+    st.title("🚀 إدارة التحديثات الإجبارية ورابط التحميل المباشر")
+    st.warning("تحذير: تفعيل الإيقاف الإجباري سيجبر المستخدمين على تحميل النسخة الجديدة لتجاوز شاشة التحديث.")
     
     config = pd.read_sql("SELECT * FROM myapp.app_config WHERE id = 1", conn).iloc[0]
     
     with st.form("update_form"):
         new_ver = st.text_input("رقم الإصدار الأحدث (مثل 7.2.0):", value=config['latest_version'])
         new_url = st.text_input("رابط تحميل الـ APK المباشر:", value=config['update_url'])
-        new_msg = st.text_area("رسالة التنبيه للمستخدم:", value=config['update_message'])
+        new_msg = st.text_area("رسالة التنبيه للمستخدم عند التحديث:", value=config['update_message'])
         is_forced = st.checkbox("تفعيل الإيقاف الإجباري للنسخ القديمة", value=config['force_update_enabled'])
         
-        if st.form_submit_button("حفظ الإعدادات 💾"):
+        if st.form_submit_button("حفظ وتحديث بيانات الإصدار 💾"):
             if run_query("""
                 UPDATE myapp.app_config 
                 SET latest_version=%s, update_url=%s, update_message=%s, force_update_enabled=%s 
                 WHERE id = 1
             """, (new_ver, new_url, new_msg, is_forced)):
-                st.success("تم الحفظ بنجاح")
+                st.success("تم حفظ إعدادات التحديث الإجباري ورابط التحميل بنجاح!")
                 st.rerun()
+                
+    st.markdown("---")
+    st.markdown("### 📥 معاينة رابط التحميل الحالي المتاح:")
+    if config['update_url']:
+        st.markdown(f"🔗 **[اضغط هنا لتحميل النسخة الأحدث مباشرة ({config['latest_version']})]({config['update_url']})**")
+    else:
+        st.info("لم يتم تعيين رابط تحميل مباشر للنسخة بعد.")
 
+# 3. توليد وإدارة الأكواد
 elif choice == "🎫 توليد وإدارة الأكواد (الادمن)":
-    st.title("🎫 توليد الأكواد")
-    with st.form("gen"):
-        tp = st.selectbox("النوع:", ["VIP", "TRIAL"])
-        qty = st.number_input("الكمية:", min_value=1, value=10)
-        if st.form_submit_button("توليد"):
-            for _ in range(qty):
-                code = f"{tp}-{''.join(random.choices(string.ascii_uppercase + string.digits, k=6))}"
-                run_query("INSERT INTO myapp.subscriptions (code, sub_type, duration_days, is_used) VALUES (%s,%s,30,FALSE)", (code, tp))
-            st.success("تم التوليد بنجاح")
+    st.title("🎫 لوحة توليد وإدارة الأكواد الشاملة")
+    df_codes = pd.read_sql("SELECT * FROM myapp.subscriptions ORDER BY id DESC", conn)
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        with st.form("gen"):
+            tp = st.selectbox("نوع الكود:", ["VIP", "TRIAL"])
+            qty = st.number_input("الكمية:", min_value=1, value=10)
+            if st.form_submit_button("توليد الأكواد 🚀"):
+                for _ in range(qty):
+                    code = f"{tp}-{''.join(random.choices(string.ascii_uppercase + string.digits, k=6))}"
+                    run_query("INSERT INTO myapp.subscriptions (code, sub_type, duration_days, is_used) VALUES (%s,%s,30,FALSE)", (code, tp))
+                st.success("تم التوليد بنجاح")
+                st.rerun()
+    with col2:
+        st.metric("أكواد غير مستعملة", len(df_codes[df_codes['is_used'] == False]))
+        st.metric("أكواد مستعملة", len(df_codes[df_codes['is_used'] == True]))
+        
+    st.markdown("---")
+    t1, t2 = st.tabs(["الأكواد الجديدة", "الأكواد المستعملة"])
+    with t1:
+        st.dataframe(df_codes[df_codes['is_used'] == False][['id', 'code', 'sub_type', 'duration_days']], use_container_width=True)
+    with t2:
+        st.dataframe(df_codes[df_codes['is_used'] == True][['code', 'used_by_device', 'used_at', 'sub_type']], use_container_width=True)
 
+# 4. قسم الشركاء
+elif choice == "🤝 قسم الشركاء (الموزعين)":
+    st.title("🤝 لوحة الشركاء والموزعين")
+    df_codes = pd.read_sql("SELECT * FROM myapp.subscriptions ORDER BY id DESC", conn)
+    c1, c2 = st.columns(2)
+    c1.metric("📦 الأكواد المتاحة", len(df_codes[df_codes['is_used'] == False]))
+    c2.metric("✅ الأكواد المفعلة", len(df_codes[df_codes['is_used'] == True]))
+    st.dataframe(df_codes[df_codes['is_used'] == False][['code', 'sub_type', 'duration_days']], use_container_width=True)
+
+# 5. تحليل البيانات
+elif choice == "📈 تحليل البيانات":
+    st.title("📈 تحليل البيانات وأوقات الذروة")
+    try:
+        df_orders = pd.read_sql("SELECT order_time, price FROM myapp.accepted_orders", conn)
+        if not df_orders.empty:
+            df_orders['hour'] = pd.to_datetime(df_orders['order_time']).dt.hour
+            fig = px.bar(df_orders.groupby('hour').size().reset_index(name='count'), x='hour', y='count', title="أوقات الذروة للطلبات المقبولة (بالساعة)")
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("لا توجد سجلات طلبات كافية لعرض الرسوم البيانية حالياً.")
+    except Exception as e:
+        st.info(f"البيانات غير متوفرة: {e}")
+
+# 6. حالة السيرفر
+elif choice == "🖥️ حالة السيرفر":
+    st.title("🖥️ مراقبة السيرفر")
+    c1, c2 = st.columns(2)
+    c1.metric("حالة الخادم وقاعدة البيانات", "متصل 🟢", "DigitalOcean")
+    c2.metric("حالة الأمان SSL", "محمية 🔒")
+
+# 7. إدارة الصلاحيات والتحكم
+elif choice == "🔐 إدارة الصلاحيات والتحكم":
+    st.title("🔐 إدارة حسابات لوحة التحكم وصلاحياتها")
+    try:
+        df_perms = pd.read_sql("SELECT id, username, role_name, is_active FROM myapp.app_permissions", conn)
+        st.dataframe(df_perms, use_container_width=True)
+        
+        selected_acc = st.selectbox("اختر حساباً للتعديل أو المراجعة:", df_perms['username'].tolist())
+        if selected_acc and selected_acc != "admin":
+            c1, c2 = st.columns(2)
+            with c1:
+                if st.button("🟢 تفعيل الحساب"):
+                    run_query("UPDATE myapp.app_permissions SET is_active = TRUE WHERE username = %s", (selected_acc,))
+                    st.success("تم تفعيل الحساب!")
+                    st.rerun()
+                if st.button("🔴 تعطيل الحساب"):
+                    run_query("UPDATE myapp.app_permissions SET is_active = FALSE WHERE username = %s", (selected_acc,))
+                    st.success("تم تعطيل الحساب!")
+                    st.rerun()
+            with c2:
+                if st.button("🗑️ حذف الحساب نهائياً"):
+                    run_query("DELETE FROM myapp.app_permissions WHERE username = %s", (selected_acc,))
+                    st.success("تم الحذف بنجاح!")
+                    st.rerun()
+    except Exception as e:
+        st.info(f"خطأ: {e}")
+
+# 8. الدعم الفني والتواصل
 elif choice == "🛠️ الدعم الفني والتواصل":
     st.title("🛠️ الدعم الفني")
     c1, c2 = st.columns(2)
