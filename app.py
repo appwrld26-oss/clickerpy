@@ -6,6 +6,7 @@ import os
 import urllib.request
 import random
 import string
+from datetime import datetime, timedelta
 
 # إعدادات الصفحة
 st.set_page_config(page_title="Ultra MyClicker Dashboard", layout="wide", page_icon="⚡")
@@ -61,7 +62,7 @@ def run_query(query, params=()):
         st.error(f"حدث خطأ: {e}")
         return False
 
-# --- 2. إعداد الجداول (إضافة جدول الإعدادات للتحديث الإجباري) ---
+# --- 2. إعداد الجداول ---
 def setup_tables():
     try:
         cur = conn.cursor()
@@ -76,7 +77,7 @@ def setup_tables():
                 is_active BOOLEAN DEFAULT TRUE
             );
         """)
-        # جدول إعدادات التطبيق (التحديث الإجباري)
+        # جدول إعدادات التطبيق (التحديث الإجباري والتحميل)
         cur.execute("""
             CREATE TABLE IF NOT EXISTS myapp.app_config (
                 id SERIAL PRIMARY KEY,
@@ -88,7 +89,7 @@ def setup_tables():
         """)
         conn.commit()
         
-        # التأكد من وجود حساب الأدمن
+        # التأكد من وجود حساب الأدمن والصلاحيات الكاملة
         cur.execute("SELECT COUNT(*) FROM myapp.app_permissions WHERE username = 'admin'")
         if cur.fetchone()[0] == 0:
             all_secs = [
@@ -128,7 +129,7 @@ if not st.session_state.logged_in:
             if res and res[2] and res[0] == p:
                 st.session_state.logged_in, st.session_state.username, st.session_state.allowed_sections = True, u, res[1]
                 st.rerun()
-            else: st.error("بيانات خاطئة")
+            else: st.error("بيانات خاطئة أو حساب معطل")
     st.stop()
 
 # --- Sidebar ---
@@ -143,50 +144,79 @@ if st.sidebar.button("🚪 خروج"):
 # =====================================================================
 
 if choice == "👥 إدارة ومراقبة المستخدمين":
-    st.title("👥 إدارة المستخدمين")
-    df = pd.read_sql("SELECT device_id, phone, status, bot_status, notice_message FROM myapp.users_status ORDER BY last_active DESC", conn)
-    st.metric("إجمالي الأجهزة", len(df))
+    st.title("👥 إدارة المستخدمين والاشتراكات")
+    
+    # قسم إضافة وتفعيل رقم الهاتف مباشرة
+    with st.expander("➕ إضافة وتفعيل رقم هاتف مشترك جديد"):
+        with st.form("add_phone_sub"):
+            phone_input = st.text_input("رقم الهاتف:")
+            sub_days = st.number_input("مدة الاشتراك (بالأيام):", min_value=1, value=30)
+            sub_type = st.selectbox("نوع الاشتراك:", ["VIP", "TRIAL", "Monthly"])
+            
+            if st.form_submit_button("حفظ وتفعيل الرقم 🚀"):
+                if not phone_input.strip():
+                    st.error("يرجى إدخال رقم الهاتف!")
+                else:
+                    gen_device_id = f"PHONE-DEV-{''.join(random.choices(string.ascii_uppercase + string.digits, k=10))}"
+                    calc_expiry = datetime.now() + timedelta(days=sub_days)
+                    if run_query("""
+                        INSERT INTO myapp.users_status (device_id, phone, status, subscription_type, expiry_date, accepted_clicks)
+                        VALUES (%s, %s, 'Active', %s, %s, 0)
+                    """, (gen_device_id, phone_input.strip(), sub_type, calc_expiry)):
+                        st.success(f"✅ تمت إضافة وتفعيل رقم الهاتف ({phone_input}) بنجاح!")
+                        st.rerun()
+
+    st.markdown("---")
+    df = pd.read_sql("SELECT device_id, phone, status, bot_status, subscription_type, expiry_date, notice_message FROM myapp.users_status ORDER BY last_active DESC", conn)
+    st.metric("إجمالي الأجهزة/المستخدمين", len(df))
     
     st.markdown("### 📢 إرسال إشعارات")
     mode = st.radio("نوع الإشعار:", ["داخل التطبيق", "إشعار نظام (StatusBar)"], horizontal=True)
     msg = st.text_input("نص الرسالة:")
     if st.button("إرسال للكل"):
         final = f"PUSH:{msg}" if mode == "إشعار نظام (StatusBar)" else msg
-        if run_query("UPDATE myapp.users_status SET notice_message = %s", (final,)): st.success("تم")
+        if run_query("UPDATE myapp.users_status SET notice_message = %s", (final,)): st.success("تم الإرسال")
     
     st.dataframe(df, use_container_width=True)
 
 elif choice == "🚀 إدارة التحديثات الإجبارية":
-    st.title("🚀 إدارة التحديثات الإجبارية (Force Update)")
-    st.warning("تحذير: تفعيل هذا الخيار سيمنع المستخدمين من استخدام النسخ القديمة حتى يقوموا بالتحديث.")
+    st.title("🚀 إدارة التحديثات الإجبارية ورابط التحميل المباشر")
+    st.warning("تحذير: تفعيل الإيقاف الإجباري سيجبر المستخدمين على تحميل النسخة الجديدة لتجاوز شاشة التحديث.")
     
     config = pd.read_sql("SELECT * FROM myapp.app_config WHERE id = 1", conn).iloc[0]
     
     with st.form("update_form"):
         new_ver = st.text_input("رقم الإصدار الأحدث (مثل 7.2.0):", value=config['latest_version'])
-        new_url = st.text_input("رابط تحميل الـ APK المباشر:", value=config['update_url'])
-        new_msg = st.text_area("رسالة التنبيه للمستخدم:", value=config['update_message'])
+        new_url = st.text_input("رابط تحميل الـ APK المباشر (مثل رابط ميديافاير أو سيرفر خارجي):", value=config['update_url'])
+        new_msg = st.text_area("رسالة التنبيه للمستخدم عند التحديث:", value=config['update_message'])
         is_forced = st.checkbox("تفعيل الإيقاف الإجباري للنسخ القديمة", value=config['force_update_enabled'])
         
-        if st.form_submit_button("حفظ الإعدادات 💾"):
+        if st.form_submit_button("حفظ وتحديث بيانات الإصدار 💾"):
             if run_query("""
                 UPDATE myapp.app_config 
                 SET latest_version=%s, update_url=%s, update_message=%s, force_update_enabled=%s 
                 WHERE id = 1
             """, (new_ver, new_url, new_msg, is_forced)):
-                st.success("تم الحفظ بنجاح")
+                st.success("تم حفظ إعدادات التحديث الإجباري ورابط التحميل بنجاح!")
                 st.rerun()
+                
+    st.markdown("---")
+    st.markdown("### 📥 معاينة رابط التحميل الحالي المتاح للمستخدمين:")
+    if config['update_url']:
+        st.markdown(f"🔗 **[اضغط هنا لتحميل النسخة الأحدث مباشرة ({config['latest_version']})]({config['update_url']})**")
+    else:
+        st.info("لم يتم تعيين رابط تحميل مباشر للنسخة بعد.")
 
 elif choice == "🎫 توليد وإدارة الأكواد (الادمن)":
     st.title("🎫 توليد الأكواد")
     with st.form("gen"):
         tp = st.selectbox("النوع:", ["VIP", "TRIAL"])
-        qty = st.number_input("الكمية:", 10)
+        qty = st.number_input("الكمية:", min_value=1, value=10)
         if st.form_submit_button("توليد"):
             for _ in range(qty):
                 code = f"{tp}-{''.join(random.choices(string.ascii_uppercase + string.digits, k=6))}"
                 run_query("INSERT INTO myapp.subscriptions (code, sub_type, duration_days, is_used) VALUES (%s,%s,30,FALSE)", (code, tp))
-            st.success("تم")
+            st.success("تم التوليد بنجاح")
 
 elif choice == "🛠️ الدعم الفني والتواصل":
     st.title("🛠️ الدعم الفني")
