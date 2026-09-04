@@ -63,10 +63,12 @@ def run_query(query, params=()):
         st.error(f"حدث خطأ في قاعدة البيانات: {e}")
         return False
 
-# --- 2. إعداد الجداول والتأكد من الأعمدة تلقائياً ---
+# --- 2. إعداد الجداول والتأكد من الأعمدة والبيانات الافتراضية ---
 def setup_tables():
     try:
         cur = conn.cursor()
+        
+        # جدول الصلاحيات
         cur.execute("""
             CREATE TABLE IF NOT EXISTS myapp.app_permissions (
                 id SERIAL PRIMARY KEY,
@@ -77,12 +79,9 @@ def setup_tables():
                 is_active BOOLEAN DEFAULT TRUE
             );
         """)
-        
-        cur.execute("""
-            ALTER TABLE myapp.app_permissions 
-            ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE;
-        """)
+        cur.execute("ALTER TABLE myapp.app_permissions ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE;")
 
+        # جدول إعدادات التطبيق وتأكيد الأعمدة
         cur.execute("""
             CREATE TABLE IF NOT EXISTS myapp.app_config (
                 id SERIAL PRIMARY KEY,
@@ -92,7 +91,6 @@ def setup_tables():
                 force_update_enabled BOOLEAN DEFAULT FALSE
             );
         """)
-        
         cur.execute("ALTER TABLE myapp.app_config ADD COLUMN IF NOT EXISTS latest_version VARCHAR(20);")
         cur.execute("ALTER TABLE myapp.app_config ADD COLUMN IF NOT EXISTS update_url TEXT;")
         cur.execute("ALTER TABLE myapp.app_config ADD COLUMN IF NOT EXISTS update_message TEXT;")
@@ -100,6 +98,7 @@ def setup_tables():
         
         conn.commit()
         
+        # إنشاء حساب الأدمن الافتراضي
         all_secs = [
             "👥 إدارة ومراقبة المستخدمين", 
             "🎫 توليد وإدارة الأكواد (الادمن)", 
@@ -118,18 +117,18 @@ def setup_tables():
                 ("admin", "admin123", "مدير النظام", all_secs, True)
             )
         else:
-            cur.execute(
-                "UPDATE myapp.app_permissions SET allowed_sections = %s WHERE username = 'admin'",
-                (all_secs,)
-            )
+            cur.execute("UPDATE myapp.app_permissions SET allowed_sections = %s WHERE username = 'admin'", (all_secs,))
         
-        cur.execute("SELECT COUNT(*) FROM myapp.app_config")
+        # التأكد من وجود سجل الإعدادات الأساسي برقم ID = 1 في app_config لمنع أي خطأ
+        cur.execute("SELECT COUNT(*) FROM myapp.app_config WHERE id = 1")
         if cur.fetchone()[0] == 0:
-            cur.execute("INSERT INTO myapp.app_config (latest_version, update_url, update_message, force_update_enabled) VALUES ('7.1.0', '', 'يرجى تحديث التطبيق للاستمرار', FALSE)")
+            cur.execute("INSERT INTO myapp.app_config (id, latest_version, update_url, update_message, force_update_enabled) VALUES (1, '7.1.0', '', 'يرجى تحديث التطبيق للاستمرار', FALSE)")
             
         conn.commit()
         cur.close()
-    except Exception as e: conn.rollback()
+    except Exception as e: 
+        conn.rollback()
+        st.error(f"خطأ في إنشاء الجداول: {e}")
 
 setup_tables()
 
@@ -273,11 +272,7 @@ if choice == "👥 إدارة ومراقبة المستخدمين":
     st.markdown("### 📋 سجل المستخدمين (مع خيارات التحديد والحذف والتعديل الفردي الثابت)")
     
     if not df_users.empty:
-        # استخدام st.data_editor مع الاحتفاظ بالحالة
-        edited_df = st.data_editor(df_users, use_container_width=True, hide_index=True, key="users_data_editor")
-        
-        # فلترة الصفوف المحددة بناءً على عمود التحديد المضاف من الأدمن إن توفر، أو عبر زر التحديد
-        # بما أننا جعلنا الاختيار عبر القائمة المنسدلة أدناه لتفادي إعادة التحميل المزعجة للجدول:
+        st.data_editor(df_users, use_container_width=True, hide_index=True, key="users_data_editor")
         
         st.markdown("---")
         st.markdown("### 🛠️ لوحة التعديل والحفظ الثابت للمشترك وإرسال الإشعارات")
@@ -286,7 +281,6 @@ if choice == "👥 إدارة ومراقبة المستخدمين":
         phones_list = df_users['phone'].astype(str).tolist()
         options = [f"هاتف: {p} | جهاز: {d[:8]}..." for p, d in zip(phones_list, user_list)]
         
-        # حفظ الاختيار في session_state لكي يثبت ولا يختفي عند التفاعل
         if "selected_user_idx" not in st.session_state:
             st.session_state.selected_user_idx = 0
 
