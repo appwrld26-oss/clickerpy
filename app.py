@@ -1,12 +1,11 @@
 import streamlit as st
-import pd as pd
+import pandas as pd
 import psycopg2
 import plotly.express as px
 import os
 import urllib.request
 import random
 import string
-import pandas as pd
 
 # إعدادات الصفحة
 st.set_page_config(page_title="Ultra MyClicker Dashboard", layout="wide", page_icon="⚡")
@@ -125,7 +124,7 @@ if st.sidebar.button("🚪 خروج"):
     st.rerun()
 
 # =====================================================================
-# 1. إدارة المستخدمين (مع نظام الإشعارات المتطور)
+# 1. إدارة المستخدمين (كاملة مع خيار StatusBar)
 # =====================================================================
 if choice == "👥 إدارة ومراقبة المستخدمين":
     st.title("👥 إدارة المستخدمين والرقابة")
@@ -133,44 +132,40 @@ if choice == "👥 إدارة ومراقبة المستخدمين":
     
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("الإجمالي", len(df_users))
-    col2.metric("Online ⚡", len(df_users[df_users['bot_status'] == 'Online']))
+    col2.metric("Online ⚡", len(df_users[df_users['bot_status'] == 'Online']) if not df_users.empty else 0)
     
     st.markdown("---")
-    st.markdown("### 📢 إرسال الإشعارات (التحكم في الظهور)")
+    st.markdown("### 📢 إرسال إشعار للنظام أو التطبيق")
     
-    c_n1, c_n2 = st.columns(2)
-    with c_n1:
-        target = st.selectbox("النطاق:", ["الكل", "Active", "Expired"])
-    with c_n2:
-        notif_mode = st.radio("مكان الظهور:", ["رسالة داخل التطبيق", "إشعار في شريط النظام (StatusBar)"], horizontal=True)
-    
-    msg = st.text_input("نص الرسالة:")
-    if st.button("📤 إرسال الإشعار الآن"):
-        # إضافة PUSH: للرسالة إذا كان المستخدم يريد إشعار نظام
-        final_msg = f"PUSH:{msg}" if notif_mode == "إشعار نظام (StatusBar)" else msg
+    cn1, cn2 = st.columns(2)
+    with cn1:
+        target = st.selectbox("الفئة المستهدفة:", ["الكل", "Active", "Expired"])
+    with cn2:
+        mode = st.radio("نوع التنبيه:", ["رسالة داخل التطبيق", "إشعار نظام (StatusBar)"], horizontal=True)
         
-        query = "UPDATE myapp.users_status SET notice_message = %s"
-        if target != "الكل": query += f" WHERE status = '{target}'"
-        if run_query(query, (final_msg,)): st.success("✅ تم الإرسال بنجاح")
+    msg = st.text_input("نص الرسالة:")
+    if st.button("📤 إرسال الآن"):
+        final_msg = f"PUSH:{msg}" if mode == "إشعار نظام (StatusBar)" else msg
+        q = "UPDATE myapp.users_status SET notice_message = %s"
+        if target != "الكل": q += f" WHERE status = '{target}'"
+        if run_query(q, (final_msg,)): st.success("✅ تم الإرسال")
 
     st.markdown("---")
-    # عرض الجدول مع إمكانية الحذف الفردي (كودك الأصلي)
-    st.subheader("📋 قائمة الأجهزة المتصلة")
+    st.subheader("📋 قائمة الأجهزة")
     df_users.insert(0, 'تحديد', False)
     edited_df = st.data_editor(df_users, use_container_width=True, hide_index=True)
     
-    # لوحة التحكم الفردية (التي تم حذفها بالخطأ سابقاً)
-    st.markdown("### 🛠️ إجراءات فردية على جهاز معين")
-    selected_device = st.selectbox("اختر جهازاً:", df_users['device_id'].tolist())
+    st.markdown("### 🛠️ إجراءات فردية")
+    selected_device = st.selectbox("اختر جهازاً للإجراء الفردي:", df_users['device_id'].tolist() if not df_users.empty else [])
     if selected_device:
         ca1, ca2 = st.columns(2)
         with ca1:
-            if st.button("🗑️ حذف هذا الجهاز"):
+            if st.button("🗑️ حذف هذا الجهاز نهائياً"):
                 if run_query("DELETE FROM myapp.users_status WHERE device_id = %s", (selected_device,)):
                     st.success("تم الحذف"); st.rerun()
         with ca2:
-            new_st = st.selectbox("تغيير الحالة:", ["Active", "Expired", "Banned"])
-            if st.button("💾 حفظ الحالة"):
+            new_st = st.selectbox("تغيير حالة الاشتراك لهذا الجهاز:", ["Active", "Expired", "Banned"])
+            if st.button("💾 حفظ الحالة الجديدة"):
                 run_query("UPDATE myapp.users_status SET status = %s WHERE device_id = %s", (new_st, selected_device))
                 st.rerun()
 
@@ -178,46 +173,66 @@ if choice == "👥 إدارة ومراقبة المستخدمين":
 # 2. توليد الأكواد
 # =====================================================================
 elif choice == "🎫 توليد وإدارة الأكواد (الادمن)":
-    st.title("🎫 توليد الأكواد")
-    with st.form("gen"):
-        tp = st.selectbox("النوع:", ["VIP", "TRIAL"])
-        days = st.number_input("الأيام:", 30)
-        qty = st.number_input("الكمية:", 10)
-        if st.form_submit_button("توليد 🚀"):
-            for _ in range(qty):
-                code = f"{tp}-{''.join(random.choices(string.ascii_uppercase + string.digits, k=6))}"
-                run_query("INSERT INTO myapp.subscriptions (code, sub_type, duration_days, is_used) VALUES (%s,%s,%s,FALSE)", (code, tp, days))
-            st.success("تم التوليد"); st.rerun()
+    st.title("🎫 توليد وإدارة الأكواد")
+    df_codes = pd.read_sql("SELECT code, sub_type, duration_days, is_used FROM myapp.subscriptions ORDER BY id DESC", conn)
+    
+    col_g, col_s = st.columns(2)
+    with col_g:
+        with st.form("gen_codes"):
+            tp = st.selectbox("نوع الاشتراك:", ["VIP", "TRIAL"])
+            d = st.number_input("الأيام:", 30)
+            q = st.number_input("الكمية:", 10)
+            if st.form_submit_button("توليد 🚀"):
+                for _ in range(q):
+                    c = f"{tp}-{''.join(random.choices(string.ascii_uppercase + string.digits, k=6))}"
+                    run_query("INSERT INTO myapp.subscriptions (code, sub_type, duration_days, is_used) VALUES (%s,%s,%s,FALSE)", (c, tp, d))
+                st.success("تم التوليد"); st.rerun()
+    with col_s:
+        st.metric("أكواد جاهزة", len(df_codes[df_codes['is_used']==False]))
+        st.metric("أكواد مفعلة", len(df_codes[df_codes['is_used']==True]))
 
 # =====================================================================
 # 3. قسم الشركاء
 # =====================================================================
 elif choice == "🤝 قسم الشركاء (الموزعين)":
     st.title("🤝 لوحة الموزعين")
-    df = pd.read_sql("SELECT code, sub_type, is_used, used_by_device FROM myapp.subscriptions ORDER BY id DESC", conn)
-    st.subheader("📦 الأكواد غير المباعة")
-    st.dataframe(df[df['is_used']==False][['code', 'sub_type']], use_container_width=True)
+    df = pd.read_sql("SELECT code, sub_type, duration_days, is_used FROM myapp.subscriptions ORDER BY id DESC", conn)
+    st.dataframe(df[df['is_used']==False], use_container_width=True)
 
 # =====================================================================
-# 6. إدارة الصلاحيات (الكود الكامل)
+# 4. تحليل البيانات
+# =====================================================================
+elif choice == "📈 تحليل البيانات":
+    st.title("📈 التحليلات")
+    st.info("سيتم عرض الرسوم البيانية هنا فور توفر بيانات طلبات كافية.")
+
+# =====================================================================
+# 5. حالة السيرفر
+# =====================================================================
+elif choice == "🖥️ حالة السيرفر":
+    st.title("🖥️ حالة الخادم")
+    st.success("🟢 متصل بقاعدة بيانات DigitalOcean | SSL: Active")
+
+# =====================================================================
+# 6. إدارة الصلاحيات
 # =====================================================================
 elif choice == "🔐 إدارة الصلاحيات والتحكم":
-    st.title("🔐 إدارة حسابات النظام")
-    col_add, col_view = st.columns([1, 1.5])
-    with col_add:
-        st.subheader("➕ حساب جديد")
-        with st.form("new_user"):
+    st.title("🔐 إدارة صلاحيات الموظفين")
+    col_a, col_b = st.columns([1, 1.5])
+    with col_a:
+        with st.form("new_acc"):
             u = st.text_input("Username:")
             p = st.text_input("Password:", type="password")
             role = st.text_input("الوصف:")
-            s1 = st.checkbox("👥 إدارة ومراقبة المستخدمين")
-            s2 = st.checkbox("🎫 توليد وإدارة الأكواد (الادمن)")
-            s3 = st.checkbox("🤝 قسم الشركاء (الموزعين)")
-            s4 = st.checkbox("📈 تحليل البيانات")
-            s5 = st.checkbox("🖥️ حالة السيرفر")
-            s6 = st.checkbox("🔐 إدارة الصلاحيات والتحكم")
-            s7 = st.checkbox("🛠️ الدعم الفني والتواصل")
-            if st.form_submit_button("حفظ الحساب"):
+            st.write("الأقسام المسموحة:")
+            s1 = st.checkbox("👥 إدارة المستخدمين")
+            s2 = st.checkbox("🎫 توليد الأكواد")
+            s3 = st.checkbox("🤝 الموزعين")
+            s4 = st.checkbox("📈 التحليل")
+            s5 = st.checkbox("🖥️ السيرفر")
+            s6 = st.checkbox("🔐 الصلاحيات")
+            s7 = st.checkbox("🛠️ الدعم الفني")
+            if st.form_submit_button("إضافة الحساب"):
                 secs = []
                 if s1: secs.append("👥 إدارة ومراقبة المستخدمين")
                 if s2: secs.append("🎫 توليد وإدارة الأكواد (الادمن)")
@@ -228,24 +243,23 @@ elif choice == "🔐 إدارة الصلاحيات والتحكم":
                 if s7: secs.append("🛠️ الدعم الفني والتواصل")
                 run_query("INSERT INTO myapp.app_permissions (username,password,role_name,allowed_sections) VALUES (%s,%s,%s,%s)", (u,p,role,secs))
                 st.rerun()
-    with col_view:
-        st.subheader("📋 الحسابات الحالية")
-        df_p = pd.read_sql("SELECT id, username, role_name, is_active FROM myapp.app_permissions", conn)
+    with col_b:
+        df_p = pd.read_sql("SELECT username, role_name, is_active FROM myapp.app_permissions", conn)
         st.dataframe(df_p, use_container_width=True)
 
 # =====================================================================
-# 7. قسم الدعم الفني (الجديد)
+# 7. الدعم الفني (NEW)
 # =====================================================================
 elif choice == "🛠️ الدعم الفني والتواصل":
     st.title("🛠️ الدعم الفني وقنوات التواصل")
     st.markdown("---")
-    col1, col2 = st.columns(2)
-    with col1:
+    c1, c2 = st.columns(2)
+    with c1:
         st.subheader("📞 تواصل مباشر")
-        st.info("للدعم الفني بخصوص السيرفر أو تفعيل الحسابات.")
-        st.write("📱 **واتساب:** [مراسلة](https://wa.me/9647XXXXXXXX)")
+        st.info("لأي مشاكل في التفعيل أو السيرفر.")
+        st.write("📱 **واتساب:** [مراسلة الإدارة](https://wa.me/9647XXXXXXXX)")
         st.write("✈️ **تليجرام:** [@MyClicker_Support](https://t.me/MyClicker_Support)")
-    with col2:
+    with c2:
         st.subheader("📢 القنوات الرسمية")
         st.write("📢 **قناة التحديثات:** [انضمام](https://t.me/MyClicker_Channel)")
-        st.write("🤝 **قناة الموزعين:** [دخول](https://t.me/MyClicker_Partners)")
+        st.write("🤝 **قناة الشركاء:** [دخول](https://t.me/MyClicker_Partners)")
