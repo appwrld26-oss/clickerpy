@@ -63,10 +63,13 @@ def run_query(query, params=()):
         st.error(f"حدث خطأ في قاعدة البيانات: {e}")
         return False
 
-# --- 2. إعداد الجداول والتأكد من الأعمدة والبيانات الافتراضية ---
+# --- 2. إعداد الجداول والتأكد التام من هيكلتها وأعمدتها ---
 def setup_tables():
     try:
         cur = conn.cursor()
+        
+        # التأكد من وجود سكيما myapp
+        cur.execute("CREATE SCHEMA IF NOT EXISTS myapp;")
         
         # جدول الصلاحيات
         cur.execute("""
@@ -81,21 +84,28 @@ def setup_tables():
         """)
         cur.execute("ALTER TABLE myapp.app_permissions ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE;")
 
-        # جدول إعدادات التطبيق وتأكيد الأعمدة
+        # جدول إعدادات التطبيق وضمان إنشاء الأعمدة
         cur.execute("""
             CREATE TABLE IF NOT EXISTS myapp.app_config (
                 id SERIAL PRIMARY KEY,
-                latest_version VARCHAR(20),
-                update_url TEXT,
-                update_message TEXT,
+                latest_version VARCHAR(20) DEFAULT '7.1.0',
+                update_url TEXT DEFAULT '',
+                update_message TEXT DEFAULT 'يرجى تحديث التطبيق للاستمرار',
                 force_update_enabled BOOLEAN DEFAULT FALSE
             );
         """)
-        cur.execute("ALTER TABLE myapp.app_config ADD COLUMN IF NOT EXISTS latest_version VARCHAR(20);")
-        cur.execute("ALTER TABLE myapp.app_config ADD COLUMN IF NOT EXISTS update_url TEXT;")
-        cur.execute("ALTER TABLE myapp.app_config ADD COLUMN IF NOT EXISTS update_message TEXT;")
+        
+        cur.execute("ALTER TABLE myapp.app_config ADD COLUMN IF NOT EXISTS latest_version VARCHAR(20) DEFAULT '7.1.0';")
+        cur.execute("ALTER TABLE myapp.app_config ADD COLUMN IF NOT EXISTS update_url TEXT DEFAULT '';")
+        cur.execute("ALTER TABLE myapp.app_config ADD COLUMN IF NOT EXISTS update_message TEXT DEFAULT 'يرجى تحديث التطبيق للاستمرار';")
         cur.execute("ALTER TABLE myapp.app_config ADD COLUMN IF NOT EXISTS force_update_enabled BOOLEAN DEFAULT FALSE;")
         
+        # التأكد من وجود عمود إصدار التطبيق (app_version) في جدول مستخدمي التطبيق إن وجد
+        try:
+            cur.execute("ALTER TABLE myapp.users_status ADD COLUMN IF NOT EXISTS app_version VARCHAR(20) DEFAULT 'غير معروف';")
+        except Exception:
+            pass
+
         conn.commit()
         
         # إنشاء حساب الأدمن الافتراضي
@@ -119,8 +129,7 @@ def setup_tables():
         else:
             cur.execute("UPDATE myapp.app_permissions SET allowed_sections = %s WHERE username = 'admin'", (all_secs,))
         
-        # التأكد من وجود سجل الإعدادات الأساسي برقم ID = 1 في app_config لمنع أي خطأ
-        cur.execute("SELECT COUNT(*) FROM myapp.app_config WHERE id = 1")
+        cur.execute("SELECT COUNT(*) FROM myapp.app_config")
         if cur.fetchone()[0] == 0:
             cur.execute("INSERT INTO myapp.app_config (id, latest_version, update_url, update_message, force_update_enabled) VALUES (1, '7.1.0', '', 'يرجى تحديث التطبيق للاستمرار', FALSE)")
             
@@ -238,15 +247,21 @@ if choice == "👥 إدارة ومراقبة المستخدمين":
                     gen_device_id = f"PHONE-DEV-{''.join(random.choices(string.ascii_uppercase + string.digits, k=10))}"
                     calc_expiry = datetime.now() + timedelta(days=sub_days)
                     if run_query("""
-                        INSERT INTO myapp.users_status (device_id, phone, status, subscription_type, expiry_date, accepted_clicks)
-                        VALUES (%s, %s, 'Active', %s, %s, 0)
+                        INSERT INTO myapp.users_status (device_id, phone, status, subscription_type, expiry_date, accepted_clicks, app_version)
+                        VALUES (%s, %s, 'Active', %s, %s, 0, '7.1.0')
                     """, (gen_device_id, phone_input.strip(), sub_type, calc_expiry)):
                         st.success(f"✅ تمت إضافة وتفعيل رقم الهاتف ({phone_input}) بنجاح!")
                         st.rerun()
 
     st.markdown("---")
-    df_users = pd.read_sql("SELECT device_id, phone, status, bot_status, accepted_clicks, subscription_type, expiry_date, notice_message, last_active FROM myapp.users_status ORDER BY last_active DESC", conn)
-    
+    # جلب البيانات متضمنة عمود إصدار التطبيق (app_version)
+    try:
+        df_users = pd.read_sql("SELECT device_id, phone, status, bot_status, accepted_clicks, subscription_type, app_version, expiry_date, notice_message, last_active FROM myapp.users_status ORDER BY last_active DESC", conn)
+    except Exception:
+        # في حال لم يكن العمود موجوداً بعد في الاستعلام يتم جلبه بدونه مع تجنب الخطأ
+        df_users = pd.read_sql("SELECT device_id, phone, status, bot_status, accepted_clicks, subscription_type, expiry_date, notice_message, last_active FROM myapp.users_status ORDER BY last_active DESC", conn)
+        df_users['app_version'] = 'غير معروف'
+
     total_users = len(df_users)
     online_bots = len(df_users[df_users['bot_status'] == 'Online']) if not df_users.empty else 0
     active_users = len(df_users[df_users['status'] == 'Active']) if not df_users.empty else 0
@@ -269,7 +284,7 @@ if choice == "👥 إدارة ومراقبة المستخدمين":
             st.success("تم إرسال الإشعار للكل بنجاح!")
     
     st.markdown("---")
-    st.markdown("### 📋 سجل المستخدمين (مع خيارات التحديد والحذف والتعديل الفردي الثابت)")
+    st.markdown("### 📋 سجل المستخدمين (يتضمن إصدار التطبيق لكل مستخدم)")
     
     if not df_users.empty:
         st.data_editor(df_users, use_container_width=True, hide_index=True, key="users_data_editor")
@@ -279,7 +294,7 @@ if choice == "👥 إدارة ومراقبة المستخدمين":
         
         user_list = df_users['device_id'].tolist()
         phones_list = df_users['phone'].astype(str).tolist()
-        options = [f"هاتف: {p} | جهاز: {d[:8]}..." for p, d in zip(phones_list, user_list)]
+        options = [f"هاتف: {p} | إصدار: {v} | جهاز: {d[:6]}..." for p, v, d in zip(phones_list, df_users['app_version'].tolist(), user_list)]
         
         if "selected_user_idx" not in st.session_state:
             st.session_state.selected_user_idx = 0
@@ -349,7 +364,7 @@ elif choice == "🚀 إدارة التحديثات الإجبارية":
     st.title("🚀 إدارة التحديثات الإجبارية ورابط التحميل المباشر")
     st.warning("تحذير: تفعيل الإيقاف الإجباري سيجبر المستخدمين على تحميل النسخة الجديدة لتجاوز شاشة التحديث.")
     
-    config_df = pd.read_sql("SELECT * FROM myapp.app_config WHERE id = 1", conn)
+    config_df = pd.read_sql("SELECT latest_version, update_url, update_message, force_update_enabled FROM myapp.app_config LIMIT 1", conn)
     if not config_df.empty:
         config = config_df.iloc[0]
     else:
@@ -364,8 +379,7 @@ elif choice == "🚀 إدارة التحديثات الإجبارية":
         if st.form_submit_button("حفظ وتحديث بيانات الإصدار 💾"):
             if run_query("""
                 UPDATE myapp.app_config 
-                SET latest_version=%s, update_url=%s, update_message=%s, force_update_enabled=%s 
-                WHERE id = 1
+                SET latest_version=%s, update_url=%s, update_message=%s, force_update_enabled=%s
             """, (new_ver, new_url, new_msg, is_forced)):
                 st.success("تم حفظ إعدادات التحديث الإجباري ورابط التحميل بنجاح!")
                 st.rerun()
