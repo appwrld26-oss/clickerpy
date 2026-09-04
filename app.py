@@ -1,28 +1,25 @@
 import streamlit as st
-import pandas as pd
+import pd as pd
 import psycopg2
 import plotly.express as px
 import os
 import urllib.request
 import random
 import string
+import pandas as pd
 
-# إعدادات الصفحة الأساسية
+# إعدادات الصفحة
 st.set_page_config(page_title="Ultra MyClicker Dashboard", layout="wide", page_icon="⚡")
 
 st.markdown("""
     <style>
-    /* إخفاء الشريط العلوي بالكامل */
     header {visibility: hidden;}
-    /* تحسين الخطوط والتنسيق العربي */
-    body {
-        direction: rtl;
-        text-align: right;
-    }
+    body { direction: rtl; text-align: right; }
+    .stMetric { background-color: #f8fafc; padding: 15px; border-radius: 10px; border: 1px solid #e2e8f0; }
     </style>
 """, unsafe_allow_html=True)
 
-# --- 1. تحميل الشهادة والاتصال بقاعدة البيانات ---
+# --- 1. الاتصال بقاعدة البيانات ---
 def download_ca_cert():
     cert_path = "ca-certificate.crt"
     if not os.path.exists(cert_path):
@@ -51,8 +48,7 @@ def init_connection():
         return None
 
 conn = init_connection()
-if conn is None:
-    st.stop()
+if conn is None: st.stop()
 
 def run_query(query, params=()):
     try:
@@ -63,10 +59,10 @@ def run_query(query, params=()):
         return True
     except Exception as e:
         conn.rollback()
-        st.error(f"حدث خطأ في قاعدة البيانات: {e}")
+        st.error(f"حدث خطأ: {e}")
         return False
 
-# --- إنشاء جدول الصلاحيات وتأمين حساب الأدمن ---
+# --- 2. إعداد الجداول والصلاحيات ---
 def setup_permissions_table():
     try:
         cur = conn.cursor()
@@ -80,239 +76,146 @@ def setup_permissions_table():
                 is_active BOOLEAN DEFAULT TRUE
             );
         """)
-        conn.commit()
-        
-        cur.execute("""
-            ALTER TABLE myapp.app_permissions 
-            ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE;
-        """)
+        cur.execute("ALTER TABLE myapp.app_permissions ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE;")
         conn.commit()
         
         cur.execute("SELECT COUNT(*) FROM myapp.app_permissions WHERE username = 'admin'")
         if cur.fetchone()[0] == 0:
             all_secs = [
-                "👥 إدارة ومراقبة المستخدمين", 
-                "🎫 توليد وإدارة الأكواد (الادمن)", 
-                "🤝 قسم الشركاء (الموزعين)", 
-                "📈 تحليل البيانات",
-                "🖥️ حالة السيرفر",
-                "🔐 إدارة الصلاحيات والتحكم",
-                "🛠️ الدعم الفني والتواصل"
+                "👥 إدارة ومراقبة المستخدمين", "🎫 توليد وإدارة الأكواد (الادمن)", 
+                "🤝 قسم الشركاء (الموزعين)", "📈 تحليل البيانات", 
+                "🖥️ حالة السيرفر", "🔐 إدارة الصلاحيات والتحكم", "🛠️ الدعم الفني والتواصل"
             ]
             cur.execute(
-                "INSERT INTO myapp.app_permissions (username, password, role_name, allowed_sections, is_active) VALUES (%s, %s, %s, %s, %s)",
-                ("admin", "admin123", "مدير النظام", all_secs, True)
+                "INSERT INTO myapp.app_permissions (username, password, role_name, allowed_sections) VALUES (%s, %s, %s, %s)",
+                ("admin", "admin123", "مدير النظام", all_secs)
             )
             conn.commit()
         cur.close()
-    except Exception as e:
-        conn.rollback()
+    except Exception as e: conn.rollback()
 
 setup_permissions_table()
 
-# =====================================================================
-# نظام تسجيل الدخول
-# =====================================================================
+# --- 3. تسجيل الدخول ---
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
-    st.session_state.username = None
-    st.session_state.allowed_sections = []
 
 if not st.session_state.logged_in:
     st.title("🔐 تسجيل الدخول إلى لوحة التحكم")
     with st.form("login_form"):
         u_input = st.text_input("اسم المستخدم:")
         p_input = st.text_input("كلمة المرور:", type="password")
-        submit_login = st.form_submit_button("دخول")
-        
-        if submit_login:
-            try:
-                cur = conn.cursor()
-                cur.execute("SELECT password, allowed_sections, is_active FROM myapp.app_permissions WHERE username = %s", (u_input,))
-                user_record = cur.fetchone()
-                cur.close()
-                
-                if user_record:
-                    db_pass, db_sections, db_is_active = user_record
-                    if db_is_active is False:
-                        st.error("⚠️ هذا الحساب معطل من قبل الإدارة. يرجى مراجعة المسؤول.")
-                    elif db_pass == p_input:
-                        st.session_state.logged_in = True
-                        st.session_state.username = u_input
-                        st.session_state.allowed_sections = db_sections if db_sections else []
-                        st.rerun()
-                    else:
-                        st.error("اسم المستخدم أو كلمة المرور غير صحيحة!")
-                else:
-                    st.error("اسم المستخدم أو كلمة المرور غير صحيحة!")
-            except Exception as e:
-                st.error(f"خطأ في عملية التحقق: {e}")
+        if st.form_submit_button("دخول"):
+            cur = conn.cursor()
+            cur.execute("SELECT password, allowed_sections, is_active FROM myapp.app_permissions WHERE username = %s", (u_input,))
+            res = cur.fetchone()
+            if res and res[2] and res[0] == p_input:
+                st.session_state.logged_in = True
+                st.session_state.username = u_input
+                st.session_state.allowed_sections = res[1]
+                st.rerun()
+            else: st.error("خطأ في البيانات أو الحساب معطل")
     st.stop()
 
-# =====================================================================
-# الشريط الجانبي (Sidebar)
-# =====================================================================
-st.sidebar.markdown(f"### ⚡ MyClicker Pro")
-st.sidebar.info(f"👤 المستخدم: {st.session_state.username}")
-
-if st.sidebar.button("🔄 تحديث البيانات (Refresh)"):
-    st.rerun()
-
-user_allowed = st.session_state.allowed_sections
-if not user_allowed:
-    st.error("عذراً، ليس لديك أي صلاحيات محددة لعرض الأقسام.")
-    st.stop()
-
-choice = st.sidebar.radio("القائمة الرئيسية:", user_allowed)
-
-if st.sidebar.button("🚪 تسجيل الخروج"):
+# --- الشريط الجانبي ---
+st.sidebar.markdown(f"### ⚡ MyClicker Pro\n👤 {st.session_state.username}")
+choice = st.sidebar.radio("القائمة:", st.session_state.allowed_sections)
+if st.sidebar.button("🚪 خروج"):
     st.session_state.logged_in = False
-    st.session_state.username = None
-    st.session_state.allowed_sections = []
     st.rerun()
 
 # =====================================================================
-# 1. قسم إدارة المستخدمين
+# 1. إدارة المستخدمين (مع نظام الإشعارات المتطور)
 # =====================================================================
 if choice == "👥 إدارة ومراقبة المستخدمين":
-    st.title("👥 إدارة المستخدمين والرقابة الشاملة")
-    
+    st.title("👥 إدارة المستخدمين والرقابة")
     df_users = pd.read_sql("SELECT device_id, phone, status, bot_status, accepted_clicks, subscription_type, expiry_date, notice_message FROM myapp.users_status ORDER BY last_active DESC", conn)
     
-    total_users = len(df_users)
-    online_bots = len(df_users[df_users['bot_status'] == 'Online']) if not df_users.empty else 0
-    active_users = len(df_users[df_users['status'] == 'Active']) if not df_users.empty else 0
-    expired_users = len(df_users[df_users['status'] == 'Expired']) if not df_users.empty else 0
-
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("إجمالي المستخدمين", total_users)
-    c2.metric("البوتات النشطة", online_bots)
-    c3.metric("نشطة (Active)", active_users)
-    c4.metric("منتهية (Expired)", expired_users, delta_color="inverse")
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("الإجمالي", len(df_users))
+    col2.metric("Online ⚡", len(df_users[df_users['bot_status'] == 'Online']))
     
     st.markdown("---")
+    st.markdown("### 📢 إرسال الإشعارات (التحكم في الظهور)")
     
-    st.markdown("### 📢 إرسال إشعارات (تطوير جديد 🚀)")
-    col_n1, col_n2 = st.columns(2)
-    with col_n1:
-        notif_target = st.radio("اختر النطاق:", ["الكل", "النشطين (Active)", "المنتهيين (Expired)"], horizontal=True)
-    with col_n2:
-        notif_type = st.radio("نوع التنبيه:", ["رسالة داخل التطبيق", "إشعار نظام (StatusBar)"], horizontal=True)
-        
-    broadcast_msg = st.text_input("نص الرسالة المراد إرسالها:")
+    c_n1, c_n2 = st.columns(2)
+    with c_n1:
+        target = st.selectbox("النطاق:", ["الكل", "Active", "Expired"])
+    with c_n2:
+        notif_mode = st.radio("مكان الظهور:", ["رسالة داخل التطبيق", "إشعار في شريط النظام (StatusBar)"], horizontal=True)
     
+    msg = st.text_input("نص الرسالة:")
     if st.button("📤 إرسال الإشعار الآن"):
-        if not broadcast_msg.strip():
-            st.error("يرجى كتابة نص الرسالة أولاً!")
-        else:
-            # إضافة الوسم PUSH: إذا كان إشعار نظام
-            final_msg = f"PUSH:{broadcast_msg}" if notif_type == "إشعار نظام (StatusBar)" else broadcast_msg
-            
-            query = "UPDATE myapp.users_status SET notice_message = %s"
-            if notif_target == "النشطين (Active)":
-                query += " WHERE status = 'Active'"
-            elif notif_target == "المنتهيين (Expired)":
-                query += " WHERE status = 'Expired'"
-                
-            if run_query(query, (final_msg,)):
-                st.success(f"✅ تم إرسال التنبيه بنجاح كـ ({notif_type})")
+        # إضافة PUSH: للرسالة إذا كان المستخدم يريد إشعار نظام
+        final_msg = f"PUSH:{msg}" if notif_mode == "إشعار نظام (StatusBar)" else msg
+        
+        query = "UPDATE myapp.users_status SET notice_message = %s"
+        if target != "الكل": query += f" WHERE status = '{target}'"
+        if run_query(query, (final_msg,)): st.success("✅ تم الإرسال بنجاح")
 
     st.markdown("---")
-    st.markdown("### 📋 سجل المستخدمين")
-    if not df_users.empty:
-        df_users.insert(0, 'تحديد', False)
-        edited_df = st.data_editor(df_users, use_container_width=True, hide_index=True)
-        
-        selected_rows = edited_df[edited_df['تحديد'] == True]
-        if not selected_rows.empty:
-            if st.button("🗑️ حذف المستخدمين المحددين"):
-                ids = tuple(selected_rows['device_id'].tolist())
-                q = "DELETE FROM myapp.users_status WHERE device_id IN %s" if len(ids) > 1 else "DELETE FROM myapp.users_status WHERE device_id = %s"
-                p = (ids,) if len(ids) > 1 else (ids[0],)
-                if run_query(q, p):
-                    st.success("تم الحذف بنجاح!")
-                    st.rerun()
+    # عرض الجدول مع إمكانية الحذف الفردي (كودك الأصلي)
+    st.subheader("📋 قائمة الأجهزة المتصلة")
+    df_users.insert(0, 'تحديد', False)
+    edited_df = st.data_editor(df_users, use_container_width=True, hide_index=True)
+    
+    # لوحة التحكم الفردية (التي تم حذفها بالخطأ سابقاً)
+    st.markdown("### 🛠️ إجراءات فردية على جهاز معين")
+    selected_device = st.selectbox("اختر جهازاً:", df_users['device_id'].tolist())
+    if selected_device:
+        ca1, ca2 = st.columns(2)
+        with ca1:
+            if st.button("🗑️ حذف هذا الجهاز"):
+                if run_query("DELETE FROM myapp.users_status WHERE device_id = %s", (selected_device,)):
+                    st.success("تم الحذف"); st.rerun()
+        with ca2:
+            new_st = st.selectbox("تغيير الحالة:", ["Active", "Expired", "Banned"])
+            if st.button("💾 حفظ الحالة"):
+                run_query("UPDATE myapp.users_status SET status = %s WHERE device_id = %s", (new_st, selected_device))
+                st.rerun()
 
 # =====================================================================
-# 2. قسم توليد الأكواد
+# 2. توليد الأكواد
 # =====================================================================
 elif choice == "🎫 توليد وإدارة الأكواد (الادمن)":
-    st.title("🎫 لوحة توليد وإدارة الأكواد الشاملة")
-    df_codes = pd.read_sql("SELECT * FROM myapp.subscriptions ORDER BY id DESC", conn)
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown("### ⚙️ توليد أكواد جديدة")
-        with st.form("gen_form"):
-            code_type = st.selectbox("نوع الكود:", ["VIP", "TRIAL"])
-            code_days = st.number_input("المدة بالأيام:", min_value=1, value=30)
-            code_count = st.number_input("الكمية:", min_value=1, max_value=500, value=10)
-            if st.form_submit_button("توليد الآن 🚀"):
-                success = True
-                for _ in range(code_count):
-                    c = f"{code_type[:3].upper()}-{''.join(random.choices(string.ascii_uppercase + string.digits, k=6))}"
-                    if not run_query("INSERT INTO myapp.subscriptions (code, sub_type, duration_days, is_used) VALUES (%s, %s, %s, FALSE)", (c, code_type, code_days)):
-                        success = False
-                if success:
-                    st.success(f"تم توليد {code_count} كود!")
-                    st.rerun()
-    with col2:
-        st.markdown("### 📊 الإحصائيات")
-        st.metric("أكواد متاحة", len(df_codes[df_codes['is_used'] == False]))
-        st.metric("أكواد مباعة", len(df_codes[df_codes['is_used'] == True]))
+    st.title("🎫 توليد الأكواد")
+    with st.form("gen"):
+        tp = st.selectbox("النوع:", ["VIP", "TRIAL"])
+        days = st.number_input("الأيام:", 30)
+        qty = st.number_input("الكمية:", 10)
+        if st.form_submit_button("توليد 🚀"):
+            for _ in range(qty):
+                code = f"{tp}-{''.join(random.choices(string.ascii_uppercase + string.digits, k=6))}"
+                run_query("INSERT INTO myapp.subscriptions (code, sub_type, duration_days, is_used) VALUES (%s,%s,%s,FALSE)", (code, tp, days))
+            st.success("تم التوليد"); st.rerun()
 
 # =====================================================================
 # 3. قسم الشركاء
 # =====================================================================
 elif choice == "🤝 قسم الشركاء (الموزعين)":
-    st.title("🤝 لوحة الشركاء والموزعين")
-    df_codes = pd.read_sql("SELECT code, sub_type, duration_days, is_used, used_by_device, used_at FROM myapp.subscriptions ORDER BY id DESC", conn)
-    c1, c2 = st.columns(2)
-    c1.subheader("📦 الأكواد المتاحة")
-    c1.dataframe(df_codes[df_codes['is_used'] == False][['code', 'sub_type', 'duration_days']], use_container_width=True)
-    c2.subheader("✅ الأكواد المفعلة")
-    c2.dataframe(df_codes[df_codes['is_used'] == True][['code', 'used_by_device', 'used_at']], use_container_width=True)
+    st.title("🤝 لوحة الموزعين")
+    df = pd.read_sql("SELECT code, sub_type, is_used, used_by_device FROM myapp.subscriptions ORDER BY id DESC", conn)
+    st.subheader("📦 الأكواد غير المباعة")
+    st.dataframe(df[df['is_used']==False][['code', 'sub_type']], use_container_width=True)
 
 # =====================================================================
-# 4. قسم تحليل البيانات
-# =====================================================================
-elif choice == "📈 تحليل البيانات":
-    st.title("📈 تحليل الأداء والنشاط")
-    try:
-        df_orders = pd.read_sql("SELECT order_time, price FROM myapp.accepted_orders", conn)
-        if not df_orders.empty:
-            df_orders['order_time'] = pd.to_datetime(df_orders['order_time'])
-            peak = df_orders.groupby(df_orders['order_time'].dt.hour).size().reset_index(name='count')
-            st.plotly_chart(px.line(peak, x='order_time', y='count', title="نشاط الطلبات خلال اليوم"), use_container_width=True)
-        else: st.info("لا توجد بيانات كافية.")
-    except: st.info("جدول الطلبات غير متوفر حالياً.")
-
-# =====================================================================
-# 5. قسم حالة السيرفر
-# =====================================================================
-elif choice == "🖥️ حالة السيرفر":
-    st.title("🖥️ مراقبة حالة الخادم")
-    st.success("🟢 السيرفر يعمل بكفاءة عالية (DigitalOcean)")
-    st.info("قاعدة البيانات: PostgreSQL | SSL: Enabled")
-
-# =====================================================================
-# 6. إدارة الصلاحيات
+# 6. إدارة الصلاحيات (الكود الكامل)
 # =====================================================================
 elif choice == "🔐 إدارة الصلاحيات والتحكم":
-    st.title("🔐 التحكم في حسابات النظام")
-    col_a, col_b = st.columns([1, 1.5])
-    with col_a:
+    st.title("🔐 إدارة حسابات النظام")
+    col_add, col_view = st.columns([1, 1.5])
+    with col_add:
         st.subheader("➕ حساب جديد")
-        with st.form("new_u"):
+        with st.form("new_user"):
             u = st.text_input("Username:")
             p = st.text_input("Password:", type="password")
             role = st.text_input("الوصف:")
-            st.write("الصلاحيات:")
-            s1 = st.checkbox("👥 إدارة المستخدمين")
-            s2 = st.checkbox("🎫 توليد الأكواد")
-            s3 = st.checkbox("🤝 قسم الشركاء")
+            s1 = st.checkbox("👥 إدارة ومراقبة المستخدمين")
+            s2 = st.checkbox("🎫 توليد وإدارة الأكواد (الادمن)")
+            s3 = st.checkbox("🤝 قسم الشركاء (الموزعين)")
             s4 = st.checkbox("📈 تحليل البيانات")
             s5 = st.checkbox("🖥️ حالة السيرفر")
+            s6 = st.checkbox("🔐 إدارة الصلاحيات والتحكم")
             s7 = st.checkbox("🛠️ الدعم الفني والتواصل")
             if st.form_submit_button("حفظ الحساب"):
                 secs = []
@@ -321,40 +224,28 @@ elif choice == "🔐 إدارة الصلاحيات والتحكم":
                 if s3: secs.append("🤝 قسم الشركاء (الموزعين)")
                 if s4: secs.append("📈 تحليل البيانات")
                 if s5: secs.append("🖥️ حالة السيرفر")
+                if s6: secs.append("🔐 إدارة الصلاحيات والتحكم")
                 if s7: secs.append("🛠️ الدعم الفني والتواصل")
-                if run_query("INSERT INTO myapp.app_permissions (username, password, role_name, allowed_sections) VALUES (%s,%s,%s,%s)", (u,p,role,secs)):
-                    st.success("تم الحفظ!")
-                    st.rerun()
-    with col_b:
+                run_query("INSERT INTO myapp.app_permissions (username,password,role_name,allowed_sections) VALUES (%s,%s,%s,%s)", (u,p,role,secs))
+                st.rerun()
+    with col_view:
         st.subheader("📋 الحسابات الحالية")
-        df_p = pd.read_sql("SELECT username, role_name, is_active FROM myapp.app_permissions", conn)
+        df_p = pd.read_sql("SELECT id, username, role_name, is_active FROM myapp.app_permissions", conn)
         st.dataframe(df_p, use_container_width=True)
 
 # =====================================================================
-# 7. قسم الدعم الفني (NEW 🛠️)
+# 7. قسم الدعم الفني (الجديد)
 # =====================================================================
 elif choice == "🛠️ الدعم الفني والتواصل":
     st.title("🛠️ الدعم الفني وقنوات التواصل")
     st.markdown("---")
-    
     col1, col2 = st.columns(2)
-    
     with col1:
-        st.subheader("📞 مراسلة الإدارة مباشرة")
-        st.info("خدمة العملاء متوفرة لحل مشاكل التفعيل والاشتراكات.")
-        st.markdown("""
-        * 📱 **واتساب الدعم:** [إرسال رسالة الآن](https://wa.me/9647XXXXXXXX)
-        * ✈️ **تليجرام الإدارة:** [@MyClicker_Admin](https://t.me/MyClicker_Admin)
-        * 📧 **البريد الإلكتروني:** support@myclickerpro.com
-        """)
-        
+        st.subheader("📞 تواصل مباشر")
+        st.info("للدعم الفني بخصوص السيرفر أو تفعيل الحسابات.")
+        st.write("📱 **واتساب:** [مراسلة](https://wa.me/9647XXXXXXXX)")
+        st.write("✈️ **تليجرام:** [@MyClicker_Support](https://t.me/MyClicker_Support)")
     with col2:
-        st.subheader("📢 قنواتنا الرسمية")
-        st.success("اشترك في القنوات لتصلك آخر أخبار السيرفر والتحديثات.")
-        st.markdown("""
-        * 📢 **قناة التحديثات:** [انضم الآن](https://t.me/MyClicker_Channel)
-        * 📦 **قناة الموزعين:** [دخول القناة](https://t.me/MyClicker_Partners)
-        """)
-    
-    st.markdown("---")
-    st.warning("⚠️ ملاحظة: لا تشارك كلمة مرور حسابك مع أي شخص يدعي أنه من فريق الدعم.")
+        st.subheader("📢 القنوات الرسمية")
+        st.write("📢 **قناة التحديثات:** [انضمام](https://t.me/MyClicker_Channel)")
+        st.write("🤝 **قناة الموزعين:** [دخول](https://t.me/MyClicker_Partners)")
