@@ -6,7 +6,6 @@ import os
 import urllib.request
 import random
 import string
-import streamlit as st
 
 st.markdown("""
     <style>
@@ -60,7 +59,7 @@ def run_query(query, params=()):
         st.error(f"حدث خطأ في قاعدة البيانات: {e}")
         return False
 
-# --- إنشاء جدول الصلاحيات إذا لم يكن موجوداً وتأمين حساب الأدمن الافتراضي ---
+# --- إنشاء جدول الصلاحيات وتأمين حساب الأدمن وإضافة حقل تفعيل/تعطيل الحساب ---
 def setup_permissions_table():
     try:
         cur = conn.cursor()
@@ -70,8 +69,16 @@ def setup_permissions_table():
                 username VARCHAR(50) UNIQUE NOT NULL,
                 password VARCHAR(100) NOT NULL,
                 role_name VARCHAR(50),
-                allowed_sections TEXT[]
+                allowed_sections TEXT[],
+                is_active BOOLEAN DEFAULT TRUE
             );
+        """)
+        conn.commit()
+        
+        # التأكد من وجود عمود is_active في حال كان الجدول منشأ مسبقاً بدونه
+        cur.execute("""
+            ALTER TABLE myapp.app_permissions 
+            ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE;
         """)
         conn.commit()
         
@@ -86,8 +93,8 @@ def setup_permissions_table():
                 "🔐 إدارة الصلاحيات والتحكم"
             ]
             cur.execute(
-                "INSERT INTO myapp.app_permissions (username, password, role_name, allowed_sections) VALUES (%s, %s, %s, %s)",
-                ("admin", "admin123", "مدير النظام", all_secs)
+                "INSERT INTO myapp.app_permissions (username, password, role_name, allowed_sections, is_active) VALUES (%s, %s, %s, %s, %s)",
+                ("admin", "admin123", "مدير النظام", all_secs, True)
             )
             conn.commit()
         cur.close()
@@ -97,7 +104,7 @@ def setup_permissions_table():
 setup_permissions_table()
 
 # =====================================================================
-# نظام تسجيل الدخول عبر قاعدة البيانات
+# نظام تسجيل الدخول عبر قاعدة البيانات مع فحص إذا كان الحساب مفَعلاً
 # =====================================================================
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
@@ -114,15 +121,21 @@ if not st.session_state.logged_in:
         if submit_login:
             try:
                 cur = conn.cursor()
-                cur.execute("SELECT password, allowed_sections FROM myapp.app_permissions WHERE username = %s", (u_input,))
+                cur.execute("SELECT password, allowed_sections, is_active FROM myapp.app_permissions WHERE username = %s", (u_input,))
                 user_record = cur.fetchone()
                 cur.close()
                 
-                if user_record and user_record[0] == p_input:
-                    st.session_state.logged_in = True
-                    st.session_state.username = u_input
-                    st.session_state.allowed_sections = user_record[1] if user_record[1] else []
-                    st.rerun()
+                if user_record:
+                    db_pass, db_sections, db_is_active = user_record
+                    if db_is_active is False:
+                        st.error("⚠️ هذا الحساب معطل من قبل الإدارة. يرجى مراجعة المسؤول.")
+                    elif db_pass == p_input:
+                        st.session_state.logged_in = True
+                        st.session_state.username = u_input
+                        st.session_state.allowed_sections = db_sections if db_sections else []
+                        st.rerun()
+                    else:
+                        st.error("اسم المستخدم أو كلمة المرور غير صحيحة!")
                 else:
                     st.error("اسم المستخدم أو كلمة المرور غير صحيحة!")
             except Exception as e:
@@ -154,20 +167,18 @@ if st.sidebar.button("🚪 تسجيل الخروج"):
     st.rerun()
 
 # =====================================================================
-# 1. قسم إدارة المستخدمين
+# 1. قسم إدارة المستخدمين (التطبيق)
 # =====================================================================
 if choice == "👥 إدارة ومراقبة المستخدمين":
     st.title("👥 إدارة المستخدمين والرقابة الشاملة")
     
     df_users = pd.read_sql("SELECT device_id, phone, status, bot_status, accepted_clicks, subscription_type, expiry_date, notice_message FROM myapp.users_status ORDER BY last_active DESC", conn)
     
-    # حساب عدد المشتركين منتهي الصلاحية بناءً على الحالة أو تاريخ الانتهاء
     total_users = len(df_users)
     online_bots = len(df_users[df_users['bot_status'] == 'Online']) if not df_users.empty else 0
     active_users = len(df_users[df_users['status'] == 'Active']) if not df_users.empty else 0
     expired_users = len(df_users[df_users['status'] == 'Expired']) if not df_users.empty else 0
 
-    # عرض العدادات الأربعة في أعمدة متجاورة
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("إجمالي المستخدمين", total_users)
     c2.metric("البوتات النشطة (Online)", online_bots)
@@ -176,7 +187,6 @@ if choice == "👥 إدارة ومراقبة المستخدمين":
     
     st.markdown("---")
     
-    # 📢 قسم الإشعارات الجماعية والفردية
     st.markdown("### 📢 إرسال إشعارات منبثقة")
     notif_target = st.radio("اختر نطاق الإرسال:", ["مستخدم معين", "إرسال لكامل المستخدمين (الكل)", "المستخدمين النشطين فقط (Active)", "المنتهي صلاحيتهم فقط (Expired)"], horizontal=True)
     broadcast_msg = st.text_input("نص الرسالة المنبثقة المراد إرسالها:")
@@ -201,11 +211,9 @@ if choice == "👥 إدارة ومراقبة المستخدمين":
     st.markdown("### 📋 سجل المستخدمين (مراقبة الاشتراكات)")
     
     if not df_users.empty:
-        # إضافة خيار التحديد (Checkbox) لكل صف في الجدول للتحكم والحذف
         df_users.insert(0, 'تحديد', False)
         edited_df = st.data_editor(df_users, use_container_width=True, hide_index=True)
         
-        # أزرار الإجراءات على المستخدمين المحددين
         selected_rows = edited_df[edited_df['تحديد'] == True]
         
         col_act1, col_act2 = st.columns(2)
@@ -385,16 +393,16 @@ elif choice == "🖥️ حالة السيرفر":
     st.info("هذا السيرفر مرتبط بنظام Node.js (MyClicker Pro Ultra) ويعمل في الوقت الفعلي.")
 
 # =====================================================================
-# 6. قسم إدارة الصلاحيات والتحكم
+# 6. قسم إدارة الصلاحيات والتحكم (مع ميزة التسجيل والتفعيل والتعطيل)
 # =====================================================================
 elif choice == "🔐 إدارة الصلاحيات والتحكم":
     st.title("🔐 إدارة حسابات المستخدمين وصلاحيات الأقسام")
-    st.info("من هنا يمكنك إضافة مستخدمين جدد (مثل الشركاء أو الموظفين) وتحديد الأقسام المسموح لهم برؤيتها فقط.")
+    st.info("من هنا يمكنك تسجيل مستخدم جديد (شريك/موظف)، وتفعيل أو تعطيل الحسابات القائمة، وتحديد الأقسام المسموح لها برؤيتها.")
     
     col_add, col_view = st.columns([1, 1.5])
     
     with col_add:
-        st.markdown("### ➕ إضافة حساب جديد وصلاحيات")
+        st.markdown("### ➕ تسجيل مستخدم جديد")
         with st.form("add_user_form"):
             new_user = st.text_input("اسم المستخدم (Username):")
             new_pass = st.text_input("كلمة المرور (Password):", type="password")
@@ -408,7 +416,7 @@ elif choice == "🔐 إدارة الصلاحيات والتحكم":
             sec_p5 = st.checkbox("🖥️ حالة السيرفر")
             sec_p6 = st.checkbox("🔐 إدارة الصلاحيات والتحكم")
             
-            submit_new_user = st.form_submit_button("حفظ وإضافة الحساب 💾")
+            submit_new_user = st.form_submit_button("تسجيل الحساب وحفظه 💾")
             
             if submit_new_user:
                 if not new_user or not new_pass:
@@ -425,32 +433,64 @@ elif choice == "🔐 إدارة الصلاحيات والتحكم":
                     try:
                         cur = conn.cursor()
                         cur.execute(
-                            "INSERT INTO myapp.app_permissions (username, password, role_name, allowed_sections) VALUES (%s, %s, %s, %s)",
-                            (new_user, new_pass, role_desc, selected_sections)
+                            "INSERT INTO myapp.app_permissions (username, password, role_name, allowed_sections, is_active) VALUES (%s, %s, %s, %s, %s)",
+                            (new_user, new_pass, role_desc, selected_sections, True)
                         )
                         conn.commit()
                         cur.close()
-                        st.success(f"تم إنشاء الحساب ({new_user}) بنجاح!")
+                        st.success(f"تم تسجيل حساب المستخدم ({new_user}) بنجاح!")
                         st.rerun()
                     except Exception as err:
                         conn.rollback()
                         st.error(f"اسم المستخدم موجود مسبقاً أو حدث خطأ: {err}")
                         
     with col_view:
-        st.markdown("### 📋 الحسابات والصلاحيات الحالية")
+        st.markdown("### 📋 الحسابات وحالة التفعيل")
         try:
-            df_perms = pd.read_sql("SELECT id, username, role_name, allowed_sections FROM myapp.app_permissions", conn)
+            df_perms = pd.read_sql("SELECT id, username, role_name, is_active FROM myapp.app_permissions", conn)
             st.dataframe(df_perms, use_container_width=True)
             
             st.markdown("---")
-            st.markdown("### 🗑️ حذف حساب مستخدم")
-            del_username = st.text_input("أدخل اسم المستخدم المراد حذفه:")
-            if st.button("حذف الحساب نهائياً ⚠️"):
-                if del_username == "admin":
-                    st.error("لا يمكنك حذف حساب الأدمن الرئيسي!")
-                else:
-                    if run_query("DELETE FROM myapp.app_permissions WHERE username = %s", (del_username,)):
-                        st.success(f"تم حذف الحساب ({del_username}) بنجاح!")
-                        st.rerun()
+            st.markdown("### ⚙️ إدارة تفعيل/تعطيل أو حذف حساب")
+            
+            # جلب أسماء المستخدمين للتعديل عليهم (ما عدا الأدمن الرئيسي للحماية)
+            cur = conn.cursor()
+            cur.execute("SELECT username, is_active FROM myapp.app_permissions")
+            all_accounts = cur.fetchall()
+            cur.close()
+            
+            usernames_list = [acc[0] for acc in all_accounts]
+            selected_acc = st.selectbox("اختر حساباً لتعديل حالته:", usernames_list)
+            
+            if selected_acc:
+                # معرفة الحالة الحالية للحساب المحدد
+                curr_state = [acc[1] for acc in all_accounts if acc[0] == selected_acc][0]
+                
+                c_act_btn1, c_act_btn2, c_act_btn3 = st.columns(3)
+                
+                with c_act_btn1:
+                    if curr_state:
+                        if st.button("🔴 تعطيل الحساب"):
+                            if selected_acc == "admin":
+                                st.error("لا يمكنك تعطيل حساب الأدمن الرئيسي!")
+                            else:
+                                if run_query("UPDATE myapp.app_permissions SET is_active = FALSE WHERE username = %s", (selected_acc,)):
+                                    st.success(f"تم تعطيل الحساب ({selected_acc}) بنجاح.")
+                                    st.rerun()
+                    else:
+                        if st.button("🟢 تفعيل الحساب"):
+                            if run_query("UPDATE myapp.app_permissions SET is_active = TRUE WHERE username = %s", (selected_acc,)):
+                                st.success(f"تم تفعيل الحساب ({selected_acc}) بنجاح.")
+                                st.rerun()
+                                
+                with c_act_btn2:
+                    if st.button("🗑️ حذف الحساب نهائياً"):
+                        if selected_acc == "admin":
+                            st.error("لا يمكنك حذف حساب الأدمن الرئيسي!")
+                        else:
+                            if run_query("DELETE FROM myapp.app_permissions WHERE username = %s", (selected_acc,)):
+                                st.success(f"تم حذف الحساب ({selected_acc}) بنجاح!")
+                                st.rerun()
+                                
         except Exception as e:
             st.info(f"جاري تحميل قائمة الحسابات: {e}")
