@@ -6,7 +6,14 @@ import os
 import urllib.request
 import random
 import string
+import streamlit as st
 
+st.markdown("""
+    <style>
+    /* إخفاء الشريط العلوي بالكامل */
+    header {visibility: hidden;}
+    </style>
+""", unsafe_allow_html=True)
 st.set_page_config(page_title="Ultra MyClicker Dashboard", layout="wide", page_icon="⚡")
 
 # --- 1. تحميل الشهادة والاتصال بقاعدة البيانات ---
@@ -191,7 +198,7 @@ if choice == "👥 إدارة ومراقبة المستخدمين":
                 st.info("يرجى اختيار المستخدم المحدد من قسم لوحة التحكم بالأسفل للإرسال الفردي.")
 
     st.markdown("---")
-    st.markdown("### 📋 سجل المستخدمين (مراقبة حية وتحديد للحذف)")
+    st.markdown("### 📋 سجل المستخدمين (مراقبة الاشتراكات)")
     
     if not df_users.empty:
         # إضافة خيار التحديد (Checkbox) لكل صف في الجدول للتحكم والحذف
