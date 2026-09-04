@@ -19,15 +19,16 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- 1. الاتصال بقاعدة البيانات ---
+# --- 1. الاتصال بقاعدة البيانات مع حماية ضد فشل تحميل الشهادة ---
 def download_ca_cert():
     cert_path = "ca-certificate.crt"
     if not os.path.exists(cert_path):
         try:
             url = "https://certs.ondigitalocean.com/ca-certificate.crt"
             urllib.request.urlretrieve(url, cert_path)
-        except Exception as e:
-            st.error(f"فشل تحميل الشهادة: {e}")
+        except Exception:
+            with open(cert_path, "w") as f:
+                f.write("")
     return cert_path
 
 @st.cache_resource
@@ -62,11 +63,10 @@ def run_query(query, params=()):
         st.error(f"حدث خطأ في قاعدة البيانات: {e}")
         return False
 
-# --- 2. إعداد الجداول الشاملة ---
+# --- 2. إعداد الجداول والتأكد من الأعمدة تلقائياً ---
 def setup_tables():
     try:
         cur = conn.cursor()
-        # جدول الصلاحيات والحسابات
         cur.execute("""
             CREATE TABLE IF NOT EXISTS myapp.app_permissions (
                 id SERIAL PRIMARY KEY,
@@ -78,13 +78,11 @@ def setup_tables():
             );
         """)
         
-        # التأكد من وجود عمود is_active في حال كان الجدول موجوداً مسبقاً
         cur.execute("""
             ALTER TABLE myapp.app_permissions 
             ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE;
         """)
 
-        # جدول إعدادات التطبيق (التحديث الإجباري والتحميل)
         cur.execute("""
             CREATE TABLE IF NOT EXISTS myapp.app_config (
                 id SERIAL PRIMARY KEY,
@@ -94,9 +92,14 @@ def setup_tables():
                 force_update_enabled BOOLEAN DEFAULT FALSE
             );
         """)
+        
+        cur.execute("ALTER TABLE myapp.app_config ADD COLUMN IF NOT EXISTS latest_version VARCHAR(20);")
+        cur.execute("ALTER TABLE myapp.app_config ADD COLUMN IF NOT EXISTS update_url TEXT;")
+        cur.execute("ALTER TABLE myapp.app_config ADD COLUMN IF NOT EXISTS update_message TEXT;")
+        cur.execute("ALTER TABLE myapp.app_config ADD COLUMN IF NOT EXISTS force_update_enabled BOOLEAN DEFAULT FALSE;")
+        
         conn.commit()
         
-        # التأكد من وجود حساب الأدمن بالصلاحيات الكاملة
         all_secs = [
             "👥 إدارة ومراقبة المستخدمين", 
             "🎫 توليد وإدارة الأكواد (الادمن)", 
@@ -120,7 +123,6 @@ def setup_tables():
                 (all_secs,)
             )
         
-        # التأكد من وجود سجل الإعدادات الأساسي
         cur.execute("SELECT COUNT(*) FROM myapp.app_config")
         if cur.fetchone()[0] == 0:
             cur.execute("INSERT INTO myapp.app_config (latest_version, update_url, update_message, force_update_enabled) VALUES ('7.1.0', '', 'يرجى تحديث التطبيق للاستمرار', FALSE)")
@@ -131,7 +133,7 @@ def setup_tables():
 
 setup_tables()
 
-# --- 3. نظام المصادقة (تسجيل الدخول أو التسجيل العام) ---
+# --- 3. نظام المصادقة ---
 if "logged_in" not in st.session_state: 
     st.session_state.logged_in = False
     st.session_state.username = None
@@ -158,7 +160,7 @@ if not st.session_state.logged_in:
                     if user_record:
                         db_pass, db_sections, db_is_active = user_record
                         if db_is_active is False:
-                            st.error("⚠️ هذا الحساب معطل من قبل الإدارة. يرجى التواصل مع المسؤول.")
+                            st.error("⚠️ هذا الحساب معطل من قبل الإدارة.")
                         elif db_pass == p_input:
                             st.session_state.logged_in = True
                             st.session_state.username = u_input
@@ -220,11 +222,10 @@ if st.sidebar.button("🚪 تسجيل الخروج"):
 # تنفيذ الأقسام والقوائم الشاملة
 # =====================================================================
 
-# 1. قسم إدارة ومراقبة المستخدمين (مع الإحصائيات الكاملة وزر التحديد والتعديل والحذف)
+# 1. قسم إدارة ومراقبة المستخدمين
 if choice == "👥 إدارة ومراقبة المستخدمين":
     st.title("👥 إدارة المستخدمين والاشتراكات والتحكم الشامل")
     
-    # إضافة وتفعيل رقم الهاتف مباشرة
     with st.expander("➕ إضافة وتفعيل رقم هاتف مشترك جديد"):
         with st.form("add_phone_sub"):
             phone_input = st.text_input("رقم الهاتف:")
@@ -245,8 +246,6 @@ if choice == "👥 إدارة ومراقبة المستخدمين":
                         st.rerun()
 
     st.markdown("---")
-    
-    # --- جلب البيانات وعرض جميع الإحصائيات ---
     df_users = pd.read_sql("SELECT device_id, phone, status, bot_status, accepted_clicks, subscription_type, expiry_date, notice_message, last_active FROM myapp.users_status ORDER BY last_active DESC", conn)
     
     total_users = len(df_users)
@@ -262,51 +261,44 @@ if choice == "👥 إدارة ومراقبة المستخدمين":
     
     st.markdown("---")
     
-    st.markdown("### 📢 إرسال إشعارات منبثقة")
+    st.markdown("### 📢 إرسال إشعارات منبثقة للكل")
     mode = st.radio("نوع الإشعار:", ["داخل التطبيق", "إشعار نظام (StatusBar)"], horizontal=True)
-    msg = st.text_input("نص الرسالة:")
+    msg = st.text_input("نص الرسالة للكل:")
     if st.button("إرسال للكل"):
         final = f"PUSH:{msg}" if mode == "إشعار نظام (StatusBar)" else msg
         if run_query("UPDATE myapp.users_status SET notice_message = %s", (final,)): 
-            st.success("تم إرسال الإشعار بنجاح!")
+            st.success("تم إرسال الإشعار للكل بنجاح!")
     
     st.markdown("---")
-    st.markdown("### 📋 سجل المستخدمين (مع خيارات التحديد والحذف الجماعي والتعديل الفردي)")
+    st.markdown("### 📋 سجل المستخدمين (مع خيارات التحديد والحذف والتعديل الفردي)")
     
     if not df_users.empty:
-        # إضافة عمود التحديد (Checkbox) للجدول
         df_users.insert(0, 'تحديد', False)
         edited_df = st.data_editor(df_users, use_container_width=True, hide_index=True)
-        
         selected_rows = edited_df[edited_df['تحديد'] == True]
         
-        col_del1, col_del2 = st.columns(2)
-        with col_del1:
-            if not selected_rows.empty:
-                if st.button("🗑️ حذف المستخدمين المحددين نهائياً"):
-                    devices_to_delete = tuple(selected_rows['device_id'].tolist())
-                    if len(devices_to_delete) == 1:
-                        q = "DELETE FROM myapp.users_status WHERE device_id = %s"
-                        p = (devices_to_delete[0],)
-                    else:
-                        q = "DELETE FROM myapp.users_status WHERE device_id IN %s"
-                        p = (devices_to_delete,)
-                    
-                    if run_query(q, p):
-                        st.success("تم حذف المستخدمين المحددين بنجاح!")
-                        st.rerun()
+        if not selected_rows.empty:
+            if st.button("🗑️ حذف المستخدمين المحددين نهائياً"):
+                devices_to_delete = tuple(selected_rows['device_id'].tolist())
+                if len(devices_to_delete) == 1:
+                    q, p = "DELETE FROM myapp.users_status WHERE device_id = %s", (devices_to_delete[0],)
+                else:
+                    q, p = "DELETE FROM myapp.users_status WHERE device_id IN %s", (devices_to_delete,)
+                
+                if run_query(q, p):
+                    st.success("تم حذف المستخدمين المحددين بنجاح!")
+                    st.rerun()
 
         st.markdown("---")
-        st.markdown("### 🛠️ لوحة التعديل والحفظ الفردي للمشترك")
+        st.markdown("### 🛠️ لوحة التعديل والحفظ الفردي للمشترك وإرسال الإشعارات (عادي أو بار)")
         
         user_list = df_users['device_id'].tolist()
         phones_list = df_users['phone'].astype(str).tolist()
         options = [f"هاتف: {p} | جهاز: {d[:8]}..." for p, d in zip(phones_list, user_list)]
         
-        selected_index = st.selectbox("اختر المشترك للتعديل أو الحفظ:", range(len(options)), format_func=lambda x: options[x])
+        selected_index = st.selectbox("اختر المشترك للتعديل أو الإرسال الفردي:", range(len(options)), format_func=lambda x: options[x])
         selected_device = user_list[selected_index]
         
-        # جلب بيانات المشترك المختار بدقة
         curr_user_row = df_users[df_users['device_id'] == selected_device].iloc[0]
         
         with st.form("edit_single_user_form"):
@@ -316,18 +308,39 @@ if choice == "👥 إدارة ومراقبة المستخدمين":
                 edit_status = st.selectbox("حالة الاشتراك:", ["Active", "Expired", "Banned"], index=["Active", "Expired", "Banned"].index(curr_user_row['status']) if curr_user_row['status'] in ["Active", "Expired", "Banned"] else 0)
             with col_u2:
                 edit_sub_type = st.text_input("نوع الاشتراك:", value=str(curr_user_row['subscription_type']) if curr_user_row['subscription_type'] else "VIP")
-                edit_notice = st.text_input("إرسال رسالة/إشعار فردي:", value=str(curr_user_row['notice_message']) if curr_user_row['notice_message'] else "")
+                edit_notice = st.text_input("نص إشعار فردي للمشترك:", value="")
             
-            c_btn1, c_btn2 = st.columns(2)
+            c_btn1, c_btn2, c_btn3, c_btn4 = st.columns(4)
             with c_btn1:
                 submit_save_user = st.form_submit_button("💾 حفظ التعديلات")
             with c_btn2:
-                submit_delete_user = st.form_submit_button("🗑️ حذف هذا المشترك فقط")
+                submit_single_msg = st.form_submit_button("📤 إرسال إشعار عادي")
+            with c_btn3:
+                submit_bar_msg = st.form_submit_button("📲 إرسال إشعار (بار)")
+            with c_btn4:
+                submit_delete_user = st.form_submit_button("🗑️ حذف المشترك")
             
             if submit_save_user:
-                if run_query("UPDATE myapp.users_status SET phone = %s, status = %s, subscription_type = %s, notice_message = %s WHERE device_id = %s", (edit_phone, edit_status, edit_sub_type, edit_notice, selected_device)):
+                if run_query("UPDATE myapp.users_status SET phone = %s, status = %s, subscription_type = %s WHERE device_id = %s", (edit_phone, edit_status, edit_sub_type, selected_device)):
                     st.success("✅ تم حفظ التعديلات بنجاح!")
                     st.rerun()
+            
+            if submit_single_msg:
+                if not edit_notice.strip():
+                    st.error("يرجى كتابة نص الإشعار أولاً!")
+                else:
+                    if run_query("UPDATE myapp.users_status SET notice_message = %s WHERE device_id = %s", (edit_notice, selected_device)):
+                        st.success("✅ تم إرسال الإشعار العادي بنجاح!")
+                        st.rerun()
+
+            if submit_bar_msg:
+                if not edit_notice.strip():
+                    st.error("يرجى كتابة نص الإشعار أولاً!")
+                else:
+                    bar_final = f"PUSH:{edit_notice}"
+                    if run_query("UPDATE myapp.users_status SET notice_message = %s WHERE device_id = %s", (bar_final, selected_device)):
+                        st.success("✅ تم إرسال إشعار (البار) بنجاح!")
+                        st.rerun()
             
             if submit_delete_user:
                 if run_query("DELETE FROM myapp.users_status WHERE device_id = %s", (selected_device,)):
@@ -341,7 +354,11 @@ elif choice == "🚀 إدارة التحديثات الإجبارية":
     st.title("🚀 إدارة التحديثات الإجبارية ورابط التحميل المباشر")
     st.warning("تحذير: تفعيل الإيقاف الإجباري سيجبر المستخدمين على تحميل النسخة الجديدة لتجاوز شاشة التحديث.")
     
-    config = pd.read_sql("SELECT * FROM myapp.app_config WHERE id = 1", conn).iloc[0]
+    config_df = pd.read_sql("SELECT * FROM myapp.app_config WHERE id = 1", conn)
+    if not config_df.empty:
+        config = config_df.iloc[0]
+    else:
+        config = {'latest_version': '7.1.0', 'update_url': '', 'update_message': '', 'force_update_enabled': False}
     
     with st.form("update_form"):
         new_ver = st.text_input("رقم الإصدار الأحدث (مثل 7.2.0):", value=config['latest_version'])
