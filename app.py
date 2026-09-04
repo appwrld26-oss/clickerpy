@@ -115,7 +115,6 @@ def setup_tables():
                 ("admin", "admin123", "مدير النظام", all_secs, True)
             )
         else:
-            # تحديث صلاحيات الأدمن تلقائياً لتشمل كل الأقسام الجديدة دائماً
             cur.execute(
                 "UPDATE myapp.app_permissions SET allowed_sections = %s WHERE username = 'admin'",
                 (all_secs,)
@@ -221,10 +220,11 @@ if st.sidebar.button("🚪 تسجيل الخروج"):
 # تنفيذ الأقسام والقوائم الشاملة
 # =====================================================================
 
-# 1. قسم إدارة ومراقبة المستخدمين
+# 1. قسم إدارة ومراقبة المستخدمين (مع الإحصائيات الكاملة وزر التحديد والتعديل والحذف)
 if choice == "👥 إدارة ومراقبة المستخدمين":
-    st.title("👥 إدارة المستخدمين والاشتراكات")
+    st.title("👥 إدارة المستخدمين والاشتراكات والتحكم الشامل")
     
+    # إضافة وتفعيل رقم الهاتف مباشرة
     with st.expander("➕ إضافة وتفعيل رقم هاتف مشترك جديد"):
         with st.form("add_phone_sub"):
             phone_input = st.text_input("رقم الهاتف:")
@@ -245,8 +245,22 @@ if choice == "👥 إدارة ومراقبة المستخدمين":
                         st.rerun()
 
     st.markdown("---")
-    df = pd.read_sql("SELECT device_id, phone, status, bot_status, subscription_type, expiry_date, notice_message FROM myapp.users_status ORDER BY last_active DESC", conn)
-    st.metric("إجمالي الأجهزة/المستخدمين", len(df))
+    
+    # --- جلب البيانات وعرض جميع الإحصائيات ---
+    df_users = pd.read_sql("SELECT device_id, phone, status, bot_status, accepted_clicks, subscription_type, expiry_date, notice_message, last_active FROM myapp.users_status ORDER BY last_active DESC", conn)
+    
+    total_users = len(df_users)
+    online_bots = len(df_users[df_users['bot_status'] == 'Online']) if not df_users.empty else 0
+    active_users = len(df_users[df_users['status'] == 'Active']) if not df_users.empty else 0
+    expired_users = len(df_users[df_users['status'] == 'Expired']) if not df_users.empty else 0
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("إجمالي المشتركين/الأجهزة", total_users)
+    c2.metric("البوتات النشطة (Online)", online_bots)
+    c3.metric("المستخدمين بحالة نشطة (Active)", active_users)
+    c4.metric("منتهيو الصلاحية (Expired)", expired_users, delta_color="inverse")
+    
+    st.markdown("---")
     
     st.markdown("### 📢 إرسال إشعارات منبثقة")
     mode = st.radio("نوع الإشعار:", ["داخل التطبيق", "إشعار نظام (StatusBar)"], horizontal=True)
@@ -256,7 +270,71 @@ if choice == "👥 إدارة ومراقبة المستخدمين":
         if run_query("UPDATE myapp.users_status SET notice_message = %s", (final,)): 
             st.success("تم إرسال الإشعار بنجاح!")
     
-    st.dataframe(df, use_container_width=True)
+    st.markdown("---")
+    st.markdown("### 📋 سجل المستخدمين (مع خيارات التحديد والحذف الجماعي والتعديل الفردي)")
+    
+    if not df_users.empty:
+        # إضافة عمود التحديد (Checkbox) للجدول
+        df_users.insert(0, 'تحديد', False)
+        edited_df = st.data_editor(df_users, use_container_width=True, hide_index=True)
+        
+        selected_rows = edited_df[edited_df['تحديد'] == True]
+        
+        col_del1, col_del2 = st.columns(2)
+        with col_del1:
+            if not selected_rows.empty:
+                if st.button("🗑️ حذف المستخدمين المحددين نهائياً"):
+                    devices_to_delete = tuple(selected_rows['device_id'].tolist())
+                    if len(devices_to_delete) == 1:
+                        q = "DELETE FROM myapp.users_status WHERE device_id = %s"
+                        p = (devices_to_delete[0],)
+                    else:
+                        q = "DELETE FROM myapp.users_status WHERE device_id IN %s"
+                        p = (devices_to_delete,)
+                    
+                    if run_query(q, p):
+                        st.success("تم حذف المستخدمين المحددين بنجاح!")
+                        st.rerun()
+
+        st.markdown("---")
+        st.markdown("### 🛠️ لوحة التعديل والحفظ الفردي للمشترك")
+        
+        user_list = df_users['device_id'].tolist()
+        phones_list = df_users['phone'].astype(str).tolist()
+        options = [f"هاتف: {p} | جهاز: {d[:8]}..." for p, d in zip(phones_list, user_list)]
+        
+        selected_index = st.selectbox("اختر المشترك للتعديل أو الحفظ:", range(len(options)), format_func=lambda x: options[x])
+        selected_device = user_list[selected_index]
+        
+        # جلب بيانات المشترك المختار بدقة
+        curr_user_row = df_users[df_users['device_id'] == selected_device].iloc[0]
+        
+        with st.form("edit_single_user_form"):
+            col_u1, col_u2 = st.columns(2)
+            with col_u1:
+                edit_phone = st.text_input("تعديل رقم الهاتف:", value=str(curr_user_row['phone']) if curr_user_row['phone'] else "")
+                edit_status = st.selectbox("حالة الاشتراك:", ["Active", "Expired", "Banned"], index=["Active", "Expired", "Banned"].index(curr_user_row['status']) if curr_user_row['status'] in ["Active", "Expired", "Banned"] else 0)
+            with col_u2:
+                edit_sub_type = st.text_input("نوع الاشتراك:", value=str(curr_user_row['subscription_type']) if curr_user_row['subscription_type'] else "VIP")
+                edit_notice = st.text_input("إرسال رسالة/إشعار فردي:", value=str(curr_user_row['notice_message']) if curr_user_row['notice_message'] else "")
+            
+            c_btn1, c_btn2 = st.columns(2)
+            with c_btn1:
+                submit_save_user = st.form_submit_button("💾 حفظ التعديلات")
+            with c_btn2:
+                submit_delete_user = st.form_submit_button("🗑️ حذف هذا المشترك فقط")
+            
+            if submit_save_user:
+                if run_query("UPDATE myapp.users_status SET phone = %s, status = %s, subscription_type = %s, notice_message = %s WHERE device_id = %s", (edit_phone, edit_status, edit_sub_type, edit_notice, selected_device)):
+                    st.success("✅ تم حفظ التعديلات بنجاح!")
+                    st.rerun()
+            
+            if submit_delete_user:
+                if run_query("DELETE FROM myapp.users_status WHERE device_id = %s", (selected_device,)):
+                    st.success("✅ تم حذف المشترك بنجاح!")
+                    st.rerun()
+    else:
+        st.info("لا توجد بيانات مستخدمين مسجلة حالياً.")
 
 # 2. إدارة التحديثات الإجبارية
 elif choice == "🚀 إدارة التحديثات الإجبارية":
@@ -344,7 +422,7 @@ elif choice == "🖥️ حالة السيرفر":
     c1.metric("حالة الخادم وقاعدة البيانات", "متصل 🟢", "DigitalOcean")
     c2.metric("حالة الأمان SSL", "محمية 🔒")
 
-# 7. إدارة الصلاحيات والتحكم (مع ميزة تعديل الحسابات بشكل كامل)
+# 7. إدارة الصلاحيات والتحكم
 elif choice == "🔐 إدارة الصلاحيات والتحكم":
     st.title("🔐 إدارة حسابات لوحة التحكم وصلاحياتها وتعديلها")
     try:
@@ -358,7 +436,6 @@ elif choice == "🔐 إدارة الصلاحيات والتحكم":
         selected_acc = st.selectbox("اختر الحساب المراد تعديله:", usernames_list)
         
         if selected_acc:
-            # جلب بيانات الحساب المحدد حالياً
             cur = conn.cursor()
             cur.execute("SELECT password, role_name, allowed_sections, is_active FROM myapp.app_permissions WHERE username = %s", (selected_acc,))
             acc_data = cur.fetchone()
@@ -392,13 +469,7 @@ elif choice == "🔐 إدارة الصلاحيات والتحكم":
                     if is_checked:
                         edit_secs.append(sec)
                 
-                col_e1, col_e2 = st.columns(2)
-                with col_e1:
-                    submit_edit = st.form_submit_button("حفظ التعديلات 💾")
-                with col_e2:
-                    submit_delete = False
-                
-                if submit_edit:
+                if st.form_submit_button("حفظ تعديلات الحساب 💾"):
                     try:
                         cur = conn.cursor()
                         cur.execute("""
@@ -412,10 +483,10 @@ elif choice == "🔐 إدارة الصلاحيات والتحكم":
                         st.rerun()
                     except Exception as err:
                         conn.rollback()
-                        st.error(f"حدث خطأ أثناء التحديث (ربما اسم المستخدم الجديد موجود مسبقاً): {err}")
+                        st.error(f"حدث خطأ أثناء التحديث: {err}")
 
             st.markdown("---")
-            c_act1, c_act2, c_act3 = st.columns(3)
+            c_act1, c_act2 = st.columns(2)
             with c_act1:
                 if curr_is_active:
                     if st.button("🔴 تعطيل الحساب"):
