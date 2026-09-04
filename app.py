@@ -104,7 +104,7 @@ def setup_permissions_table():
 setup_permissions_table()
 
 # =====================================================================
-# نظام المصادقة (تسجيل الدخول أو واجهة التسجيل العامة للشركاء)
+# نظام المصادقة
 # =====================================================================
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
@@ -191,17 +191,21 @@ if st.sidebar.button("🚪 تسجيل الخروج"):
     st.rerun()
 
 # =====================================================================
-# 1. قسم إدارة المستخدمين المشتركين (مع ميزة إضافة مشترك جديد)
+# 1. قسم إدارة المستخدمين المشتركين (توليد رقم جهاز افتراضي تلقائياً)
 # =====================================================================
 if choice == "👥 إدارة ومراقبة المستخدمين":
     st.title("👥 إدارة المستخدمين والاشتراكات")
     
-    # نموذج إضافة مشترك جديد يدوياً
-    with st.expander("➕ إضافة مشترك جديد يدوياً للقاعدة"):
+    # توليد رقم جهاز افتراضي تلقائي فريد
+    auto_virtual_device = f"VIRTUAL-{''.join(random.choices(string.ascii_uppercase + string.digits, k=8))}"
+    
+    # نموذج إضافة مشترك جديد يدوياً مع رقم جهاز افتراضي تلقائي
+    with st.expander("➕ إضافة مشترك جديد يدوياً (برقم جهاز افتراضي تلقائي)"):
         with st.form("add_new_subscriber_form"):
             col_s1, col_s2 = st.columns(2)
             with col_s1:
-                new_device_id = st.text_input("معرف الجهاز (Device ID):", value=''.join(random.choices(string.ascii_lowercase + string.digits, k=16)))
+                # يظهر للمستخدم رقم افتراضي مولد مسبقاً وقابل للتعديل إذا أراد
+                new_device_id = st.text_input("معرف الجهاز الافتراضي (Device ID):", value=auto_virtual_device)
                 new_phone = st.text_input("رقم الهاتف:")
                 new_sub_type = st.selectbox("نوع الاشتراك:", ["VIP", "TRIAL", "Monthly"])
             with col_s2:
@@ -224,7 +228,7 @@ if choice == "👥 إدارة ومراقبة المستخدمين":
                         """, (new_device_id, new_phone, new_status, new_sub_type, calc_expiry, 0))
                         conn.commit()
                         cur.close()
-                        st.success(f"تم إضافة/تحديث المشترك بنجاح (الجهاز: {new_device_id})!")
+                        st.success(f"تم إنشاء المشترك وإضافة الجهاز الافتراضي بنجاح: {new_device_id}")
                         st.rerun()
                     except Exception as ex:
                         conn.rollback()
@@ -287,7 +291,7 @@ if choice == "👥 إدارة ومراقبة المستخدمين":
         st.markdown("### 🛠️ لوحة التحكم الفردية بالمشترك")
         user_list = df_users['device_id'].tolist()
         phones_list = df_users['phone'].astype(str).tolist()
-        options = [f"هاتف: {p} | جهاز: {d[:8]}..." for p, d in zip(phones_list, user_list)]
+        options = [f"هاتف: {p} | جهاز: {d}" for p, d in zip(phones_list, user_list)]
         
         selected_index = st.selectbox("اختر المشترك:", range(len(options)), format_func=lambda x: options[x])
         selected_device = user_list[selected_index]
