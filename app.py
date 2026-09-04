@@ -48,9 +48,7 @@ def init_connection():
         return None
 
 conn = init_connection()
-if conn is None: 
-    st.error("تعذر الاتصال بقاعدة البيانات.")
-    st.stop()
+if conn is None: st.stop()
 
 def run_query(query, params=()):
     try:
@@ -80,7 +78,7 @@ def setup_tables():
             );
         """)
         
-        # التأكد من وجود عمود is_active
+        # التأكد من وجود عمود is_active في حال كان الجدول موجوداً مسبقاً
         cur.execute("""
             ALTER TABLE myapp.app_permissions 
             ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE;
@@ -99,21 +97,28 @@ def setup_tables():
         conn.commit()
         
         # التأكد من وجود حساب الأدمن بالصلاحيات الكاملة
+        all_secs = [
+            "👥 إدارة ومراقبة المستخدمين", 
+            "🎫 توليد وإدارة الأكواد (الادمن)", 
+            "🤝 قسم الشركاء (الموزعين)", 
+            "📈 تحليل البيانات", 
+            "🖥️ حالة السيرفر", 
+            "🔐 إدارة الصلاحيات والتحكم", 
+            "🚀 إدارة التحديثات الإجبارية", 
+            "🛠️ الدعم الفني والتواصل"
+        ]
+        
         cur.execute("SELECT COUNT(*) FROM myapp.app_permissions WHERE username = 'admin'")
         if cur.fetchone()[0] == 0:
-            all_secs = [
-                "👥 إدارة ومراقبة المستخدمين", 
-                "🎫 توليد وإدارة الأكواد (الادمن)", 
-                "🤝 قسم الشركاء (الموزعين)", 
-                "📈 تحليل البيانات", 
-                "🖥️ حالة السيرفر", 
-                "🔐 إدارة الصلاحيات والتحكم", 
-                "🚀 إدارة التحديثات الإجبارية", 
-                "🛠️ الدعم الفني والتواصل"
-            ]
             cur.execute(
                 "INSERT INTO myapp.app_permissions (username, password, role_name, allowed_sections, is_active) VALUES (%s, %s, %s, %s, %s)",
                 ("admin", "admin123", "مدير النظام", all_secs, True)
+            )
+        else:
+            # تحديث صلاحيات الأدمن تلقائياً لتشمل كل الأقسام الجديدة دائماً
+            cur.execute(
+                "UPDATE myapp.app_permissions SET allowed_sections = %s WHERE username = 'admin'",
+                (all_secs,)
             )
         
         # التأكد من وجود سجل الإعدادات الأساسي
@@ -123,20 +128,16 @@ def setup_tables():
             
         conn.commit()
         cur.close()
-    except Exception as e: 
-        conn.rollback()
+    except Exception as e: conn.rollback()
 
 setup_tables()
 
-# --- 3. إدارة جلسة المستخدم (Session State) ---
+# --- 3. نظام المصادقة (تسجيل الدخول أو التسجيل العام) ---
 if "logged_in" not in st.session_state: 
     st.session_state.logged_in = False
-if "username" not in st.session_state: 
     st.session_state.username = None
-if "allowed_sections" not in st.session_state: 
     st.session_state.allowed_sections = []
 
-# --- 4. شاشة تسجيل الدخول أو التسجيل العام (إذا لم يتم تسجيل الدخول) ---
 if not st.session_state.logged_in:
     st.sidebar.markdown("### ⚙️ خيارات الدخول")
     auth_mode = st.sidebar.radio("اختر العملية:", ["تسجيل الدخول", "طلب حساب لوحة تحكم جديد"])
@@ -162,7 +163,7 @@ if not st.session_state.logged_in:
                         elif db_pass == p_input:
                             st.session_state.logged_in = True
                             st.session_state.username = u_input
-                            st.session_state.allowed_sections = db_sections if db_sections else ["🤝 قسم الشركاء (الموزعين)"]
+                            st.session_state.allowed_sections = db_sections if db_sections else []
                             st.rerun()
                         else:
                             st.error("اسم المستخدم أو كلمة المرور غير صحيحة!")
@@ -196,9 +197,7 @@ if not st.session_state.logged_in:
                         st.error(f"اسم المستخدم مستخدم مسبقاً أو حدث خطأ: {err}")
     st.stop()
 
-# =====================================================================
-# 5. الشريط الجانبي الرئيسي (يظهر فقط بعد تسجيل الدخول بنجاح)
-# =====================================================================
+# --- الشريط الجانبي (Sidebar) ---
 st.sidebar.markdown(f"### ⚡ MyClicker Pro")
 st.sidebar.info(f"👤 المستخدم: {st.session_state.username}")
 
@@ -207,7 +206,8 @@ if st.sidebar.button("🔄 تحديث البيانات (Refresh)"):
 
 user_allowed = st.session_state.allowed_sections
 if not user_allowed:
-    user_allowed = ["🤝 قسم الشركاء (الموزعين)"]
+    st.error("عذراً، ليس لديك أي صلاحيات لعرض الأقسام.")
+    st.stop()
 
 choice = st.sidebar.radio("القائمة الرئيسية:", user_allowed)
 
@@ -344,32 +344,103 @@ elif choice == "🖥️ حالة السيرفر":
     c1.metric("حالة الخادم وقاعدة البيانات", "متصل 🟢", "DigitalOcean")
     c2.metric("حالة الأمان SSL", "محمية 🔒")
 
-# 7. إدارة الصلاحيات والتحكم
+# 7. إدارة الصلاحيات والتحكم (مع ميزة تعديل الحسابات بشكل كامل)
 elif choice == "🔐 إدارة الصلاحيات والتحكم":
-    st.title("🔐 إدارة حسابات لوحة التحكم وصلاحياتها")
+    st.title("🔐 إدارة حسابات لوحة التحكم وصلاحياتها وتعديلها")
     try:
-        df_perms = pd.read_sql("SELECT id, username, role_name, is_active FROM myapp.app_permissions", conn)
-        st.dataframe(df_perms, use_container_width=True)
+        df_perms = pd.read_sql("SELECT username, role_name, is_active, allowed_sections FROM myapp.app_permissions", conn)
+        st.dataframe(df_perms[['username', 'role_name', 'is_active']], use_container_width=True)
         
-        selected_acc = st.selectbox("اختر حساباً للتعديل أو المراجعة:", df_perms['username'].tolist())
-        if selected_acc and selected_acc != "admin":
-            c1, c2 = st.columns(2)
-            with c1:
-                if st.button("🟢 تفعيل الحساب"):
-                    run_query("UPDATE myapp.app_permissions SET is_active = TRUE WHERE username = %s", (selected_acc,))
-                    st.success("تم تفعيل الحساب!")
-                    st.rerun()
-                if st.button("🔴 تعطيل الحساب"):
-                    run_query("UPDATE myapp.app_permissions SET is_active = FALSE WHERE username = %s", (selected_acc,))
-                    st.success("تم تعطيل الحساب!")
-                    st.rerun()
-            with c2:
+        st.markdown("---")
+        st.subheader("🛠️ تعديل حساب أو تغيير صلاحياته")
+        
+        usernames_list = df_perms['username'].tolist()
+        selected_acc = st.selectbox("اختر الحساب المراد تعديله:", usernames_list)
+        
+        if selected_acc:
+            # جلب بيانات الحساب المحدد حالياً
+            cur = conn.cursor()
+            cur.execute("SELECT password, role_name, allowed_sections, is_active FROM myapp.app_permissions WHERE username = %s", (selected_acc,))
+            acc_data = cur.fetchone()
+            cur.close()
+            
+            curr_pass, curr_role, curr_allowed, curr_is_active = acc_data
+            if curr_allowed is None: curr_allowed = []
+
+            all_available_sections = [
+                "👥 إدارة ومراقبة المستخدمين", 
+                "🎫 توليد وإدارة الأكواد (الادمن)", 
+                "🤝 قسم الشركاء (الموزعين)", 
+                "📈 تحليل البيانات", 
+                "🖥️ حالة السيرفر", 
+                "🔐 إدارة الصلاحيات والتحكم", 
+                "🚀 إدارة التحديثات الإجبارية", 
+                "🛠️ الدعم الفني والتواصل"
+            ]
+
+            with st.form("edit_account_form"):
+                st.info(f"جاري تعديل بيانات الحساب: **{selected_acc}**")
+                new_username = st.text_input("تعديل اسم المستخدم:", value=selected_acc)
+                new_password = st.text_input("تعديل كلمة المرور:", value=curr_pass)
+                new_role_name = st.text_input("تعديل الوصف أو المسمى الوظيفي:", value=curr_role if curr_role else "")
+                
+                st.markdown("**تعديل الصلاحيات والأقسام المسموح له برؤيتها:**")
+                
+                edit_secs = []
+                for sec in all_available_sections:
+                    is_checked = st.checkbox(sec, value=(sec in curr_allowed))
+                    if is_checked:
+                        edit_secs.append(sec)
+                
+                col_e1, col_e2 = st.columns(2)
+                with col_e1:
+                    submit_edit = st.form_submit_button("حفظ التعديلات 💾")
+                with col_e2:
+                    submit_delete = False
+                
+                if submit_edit:
+                    try:
+                        cur = conn.cursor()
+                        cur.execute("""
+                            UPDATE myapp.app_permissions 
+                            SET username = %s, password = %s, role_name = %s, allowed_sections = %s 
+                            WHERE username = %s
+                        """, (new_username, new_password, new_role_name, edit_secs, selected_acc))
+                        conn.commit()
+                        cur.close()
+                        st.success(f"✅ تم تحديث بيانات الحساب ({new_username}) بنجاح!")
+                        st.rerun()
+                    except Exception as err:
+                        conn.rollback()
+                        st.error(f"حدث خطأ أثناء التحديث (ربما اسم المستخدم الجديد موجود مسبقاً): {err}")
+
+            st.markdown("---")
+            c_act1, c_act2, c_act3 = st.columns(3)
+            with c_act1:
+                if curr_is_active:
+                    if st.button("🔴 تعطيل الحساب"):
+                        if selected_acc == "admin":
+                            st.error("لا يمكنك تعطيل الأدمن الرئيسي!")
+                        else:
+                            run_query("UPDATE myapp.app_permissions SET is_active = FALSE WHERE username = %s", (selected_acc,))
+                            st.success("تم تعطيل الحساب.")
+                            st.rerun()
+                else:
+                    if st.button("🟢 تفعيل الحساب"):
+                        run_query("UPDATE myapp.app_permissions SET is_active = TRUE WHERE username = %s", (selected_acc,))
+                        st.success("تم تفعيل الحساب.")
+                        st.rerun()
+            with c_act2:
                 if st.button("🗑️ حذف الحساب نهائياً"):
-                    run_query("DELETE FROM myapp.app_permissions WHERE username = %s", (selected_acc,))
-                    st.success("تم الحذف بنجاح!")
-                    st.rerun()
+                    if selected_acc == "admin":
+                        st.error("لا يمكنك حذف الأدمن الرئيسي!")
+                    else:
+                        run_query("DELETE FROM myapp.app_permissions WHERE username = %s", (selected_acc,))
+                        st.success("تم الحذف بنجاح!")
+                        st.rerun()
+
     except Exception as e:
-        st.info(f"خطأ: {e}")
+        st.info(f"خطأ في تحميل الصلاحيات: {e}")
 
 # 8. الدعم الفني والتواصل
 elif choice == "🛠️ الدعم الفني والتواصل":
