@@ -168,7 +168,7 @@ if not st.session_state.logged_in:
                         st.success("✅ تم إرسال الطلب بنجاح وهو بانتظار تفعيل الأدمن.")
                     except Exception as err:
                         conn.rollback()
-                        st.error(fاسم المستخدم مستخدم مسبقاً أو حدث خطأ: {err}")
+                        st.error(f"اسم المستخدم مستخدم مسبقاً أو حدث خطأ: {err}")
                         
     st.stop()
 
