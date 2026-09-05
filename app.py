@@ -15,14 +15,41 @@ st.set_page_config(
     page_icon="⚡"
 )
 
+# تعديل التنسيقات لفرض الألوان الفاتحة وتجنب مشكلة الشاشة السوداء في بعض المتصفحات
 st.markdown("""
     <style>
     header {visibility: hidden;}
     body { direction: rtl; text-align: right; }
-    [data-testid="stSidebar"] { text-align: right; direction: rtl; background-color: #f8fafc; }
-    .stMetric { background-color: #ffffff; padding: 18px; border-radius: 14px; border: 1px solid #e2e8f0; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); }
+    
+    /* فرض الألوان الفاتحة وتجنب الشاشة السوداء */
+    .stApp {
+        background-color: #f8fafc;
+        color: #1e293b;
+    }
+    
+    [data-testid="stSidebar"] { 
+        text-align: right; 
+        direction: rtl; 
+        background-color: #f1f5f9 !important; 
+    }
+    
+    .stMetric { 
+        background-color: #ffffff !important; 
+        padding: 18px; 
+        border-radius: 14px; 
+        border: 1px solid #e2e8f0; 
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); 
+        color: #0f172a !important;
+    }
+    
     .stTabs [data-baseweb="tab-list"] { gap: 12px; }
-    .stTabs [data-baseweb="tab"] { background-color: #f1f5f9; border-radius: 10px 10px 0 0; padding: 12px 24px; font-weight: bold; }
+    .stTabs [data-baseweb="tab"] { 
+        background-color: #f1f5f9 !important; 
+        border-radius: 10px 10px 0 0; 
+        padding: 12px 24px; 
+        font-weight: bold; 
+        color: #334155 !important;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -51,7 +78,6 @@ if not conn:
 
 def query(sql, params=()):
     try:
-        # التأكد من إعادة الاتصال إذا انقطع
         global conn
         if conn.closed != 0:
             conn = get_conn()
@@ -207,7 +233,7 @@ if page == "📈 نظرة عامة وإحصائيات الإصدارات":
             fig_bot = px.bar(bot_counts, x='Status', y='Count', title="مقارنة البوتات (Online / Offline)", color='Status')
             st.plotly_chart(fig_bot, use_container_width=True)
     else:
-        st.info("لا توجد بيانات كافية لعرس الرسومات البيانية.")
+        st.info("لا توجد بيانات كافية لعرض الرسوم البيانية.")
 
 elif page == "👥 إدارة ومراقبة المستخدمين والتفعيل":
     st.title("👥 إدارة المستخدمين، الأجهزة، والتحكم ببيانات التفعيل")
@@ -360,7 +386,7 @@ elif page == "📈 تحليل البيانات":
             fig = px.bar(df_orders.groupby('hour').size().reset_index(name='count'), x='hour', y='count', title="أوقات الذروة للطلبات المقبولة حسب الساعة")
             st.plotly_chart(fig, use_container_width=True)
         else:
-            st.info("لا توجد سجلات طلبات كافية لعرض الرسوم البيانية.")
+            st.info("لا توجد سجلات طلبات كافية لعرض الرسومات البيانية.")
     except Exception:
         st.info("بيانات الطلبات غير متوفرة في قاعدة البيانات حالياً.")
 
