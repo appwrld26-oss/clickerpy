@@ -350,16 +350,17 @@ elif page == "👥 إدارة ومراقبة المستخدمين والتفعي
 
 elif page == "📢 مركز الإشعارات الشامل الكامل":
     st.title("📢 مركز الإشعارات الشامل المتقدم")
-    st.info("💡 تحكم كامل بإرسال الإشعارات والرسائل المنبثقة الفورية للأجهزة مع إمكانية متابعة الإشعارات المعلقة وحذفها.")
+    st.info("💡 تحكم كامل بإرسال الإشعارات والرسائل المنبثقة وشريط الحالة الفورية للأجهزة.")
     
     df_notif_users = load_users_data()
     tab_send, tab_manage = st.tabs(["📤 إرسال إشعار جديد", "📋 إدارة ومتابعة الإشعارات المعلقة"])
 
     with tab_send:
         notif_target_type = st.radio("حدد نطاق الإرسال:", ["إشعار لجهاز/مستخدم فردي عبر رقم الهاتف أو ID", "إشعار لمجموعة محددة (حسب الحالة أو النوع)", "إشعار عام لجميع المشتركين"], horizontal=True)
+        notif_display_type = st.selectbox("نوع الإشعار في التطبيق:", ["شريط الحالة (Status Bar Notice)", "رسالة منبثقة إجبارية (Dialog)", "إشعار نصي عادي"])
 
         with st.form("advanced_notification_form"):
-            msg_content = st.text_area("نص الإشعار المراد إرساله للمستخدمين:")
+            msg_content = st.text_area("نص الإشعار المراد إرساله:")
             target_device_id = None
             target_group = None
 
@@ -383,20 +384,22 @@ elif page == "📢 مركز الإشعارات الشامل الكامل":
                 if not msg_content.strip():
                     st.error("يرجى كتابة نص الإشعار أولاً!")
                 else:
+                    formatted_msg = f"STATUSBAR:{msg_content}" if "شريط الحالة" in notif_display_type else msg_content
+                    
                     success_flag = False
                     if notif_target_type == "إشعار لجهاز/مستخدم فردي عبر رقم الهاتف أو ID" and target_device_id:
-                        success_flag = query("UPDATE myapp.users_status SET notice_message = %s WHERE device_id = %s", (msg_content, target_device_id))
+                        success_flag = query("UPDATE myapp.users_status SET notice_message = %s WHERE device_id = %s", (formatted_msg, target_device_id))
                     elif notif_target_type == "إشعار لمجموعة محددة (حسب الحالة أو النوع)":
                         if "Active" in target_group:
-                            success_flag = query("UPDATE myapp.users_status SET notice_message = %s WHERE status = 'Active'", (msg_content,))
+                            success_flag = query("UPDATE myapp.users_status SET notice_message = %s WHERE status = 'Active'", (formatted_msg,))
                         elif "Expired" in target_group:
-                            success_flag = query("UPDATE myapp.users_status SET notice_message = %s WHERE status = 'Expired'", (msg_content,))
+                            success_flag = query("UPDATE myapp.users_status SET notice_message = %s WHERE status = 'Expired'", (formatted_msg,))
                         elif "VIP" in target_group:
-                            success_flag = query("UPDATE myapp.users_status SET notice_message = %s WHERE subscription_type = 'VIP'", (msg_content,))
+                            success_flag = query("UPDATE myapp.users_status SET notice_message = %s WHERE subscription_type = 'VIP'", (formatted_msg,))
                         elif "TRIAL" in target_group:
-                            success_flag = query("UPDATE myapp.users_status SET notice_message = %s WHERE subscription_type = 'TRIAL'", (msg_content,))
+                            success_flag = query("UPDATE myapp.users_status SET notice_message = %s WHERE subscription_type = 'TRIAL'", (formatted_msg,))
                     elif notif_target_type == "إشعار عام لجميع المشتركين":
-                        success_flag = query("UPDATE myapp.users_status SET notice_message = %s", (msg_content,))
+                        success_flag = query("UPDATE myapp.users_status SET notice_message = %s", (formatted_msg,))
 
                     if success_flag:
                         st.cache_data.clear()
@@ -488,7 +491,7 @@ elif page == "🖥️ حالة السيرفر":
 
 elif page == "🔐 إدارة الصلاحيات والتحكم":
     st.title("🔐 إدارة حسابات لوحة التحكم وصلاحيات الأقسام")
-    st.info("من هنا يمكنك إضافة مستخدمين جدد، **تعديل صلاحيات وحسابات المستخدمين الحاليين**، أو حذف الحسابات غير المرغوبة.")
+    st.info("من هنا يمكنك إضافة مستخدمين جدد، تعديل صلاحيات وحسابات المستخدمين الحاليين، أو حذف الحسابات غير المرغوبة.")
 
     tab_add, tab_edit, tab_view = st.tabs(["➕ إضافة حساب جديد", "✏️ تعديل صلاحيات حساب موجود", "📋 عرض وحذف الحسابات"])
 
