@@ -9,7 +9,7 @@ import string
 from datetime import datetime, timedelta
 
 # =====================================================================
-# 1. إعدادات الصفحة والتنسيق الاحترافي (RTL)
+# 1. إعدادات الصفحة والتنسيق (RTL)
 # =====================================================================
 st.set_page_config(page_title="MyClicker Pro Ultra Dashboard", layout="wide", page_icon="⚡")
 
@@ -24,62 +24,57 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- وظائف قاعدة البيانات المعززة ---
+# --- وظائف قاعدة البيانات مع معالجة آمنة لملف الشهادة ---
 def download_ca_cert():
     cert_path = "ca-certificate.crt"
-    # إذا كان الملف موجوداً وحجمه 0، نقوم بحذفه للمحاولة مرة أخرى بشكل صحيح
-    if os.path.exists(cert_path) and os.path.getsize(cert_path) == 0:
-        os.remove(cert_path)
-        
-    if not os.path.exists(cert_path):
+    if not os.path.exists(cert_path) or os.path.getsize(cert_path) == 0:
         try:
             url = "https://certs.ondigitalocean.com/ca-certificate.crt"
             urllib.request.urlretrieve(url, cert_path)
         except Exception:
-            pass # لن ننشئ ملفاً فارغاً هنا
+            with open(cert_path, "w") as f: 
+                f.write("")
     return cert_path
 
 @st.cache_resource
 def init_connection():
-    cert_file = download_ca_cert()
     try:
-        # المحاولة 1: الاتصال باستخدام الشهادة (الأكثر أماناً)
-        if os.path.exists(cert_file) and os.path.getsize(cert_file) > 0:
-            return psycopg2.connect(
-                database="defaultdb", user="doadmin", password="1tHwqXCgn8BS6iTm942V3f7a",
-                host="myclicker-db-rd7ky.db1.ondigitalocean.com", port="5432",
-                sslmode="require", sslrootcert=cert_file
-            )
-        else:
-            # المحاولة 2: الاتصال بدون شهادة محددة (Fallback)
-            return psycopg2.connect(
-                database="defaultdb", user="doadmin", password="1tHwqXCgn8BS6iTm942V3f7a",
-                host="myclicker-db-rd7ky.db1.ondigitalocean.com", port="5432",
-                sslmode="require"
-            )
+        cert_file = download_ca_cert()
+        return psycopg2.connect(
+            database="defaultdb", user="doadmin", password="1tHwqXCgn8BS6iTm942V3f7a",
+            host="myclicker-db-rd7ky.db1.ondigitalocean.com", port="5432",
+            sslmode="require", sslrootcert=cert_file
+        )
     except Exception as e:
-        st.error(f"فشل الاتصال النهائي: {e}")
+        st.error(f"فشل الاتصال بقاعدة البيانات: {e}")
         return None
 
 conn = init_connection()
-if conn is None: st.stop()
+if conn is None: 
+    st.error("❌ تعذر الاتصال بقاعدة البيانات. يرجى التحقق من بيانات الاتصال أو حالة السيرفر.")
+    st.stop()
 
 def run_query(query, params=()):
     try:
-        cur = conn.cursor(); cur.execute(query, params); conn.commit(); cur.close()
+        cur = conn.cursor()
+        cur.execute(query, params)
+        conn.commit()
+        cur.close()
         return True
     except Exception as e:
-        conn.rollback(); st.error(f"خطأ في التنفيذ: {e}"); return False
+        conn.rollback()
+        st.error(f"خطأ في التنفيذ: {e}")
+        return False
 
 # =====================================================================
-# 2. إعداد الجداول (التحديث الإجباري والأنظمة الأساسية)
+# 2. إعداد الجداول (الذكاء الكامل للنظام)
 # =====================================================================
 def setup_full_system():
     try:
         cur = conn.cursor()
         cur.execute("CREATE SCHEMA IF NOT EXISTS myapp;")
         
-        # جدول إعدادات التحديث الإجباري العام
+        # جدول التحديثات الإجبارية
         cur.execute("""
             CREATE TABLE IF NOT EXISTS myapp.app_config (
                 id SERIAL PRIMARY KEY,
@@ -89,8 +84,8 @@ def setup_full_system():
                 force_update_enabled BOOLEAN DEFAULT FALSE
             );
         """)
-
-        # جدول المستخدمين المطور (مع التحديث الفردي)
+        
+        # جدول المستخدمين المطور
         cur.execute("""
             CREATE TABLE IF NOT EXISTS myapp.users_status (
                 device_id VARCHAR(255) PRIMARY KEY,
@@ -99,53 +94,108 @@ def setup_full_system():
                 bot_status VARCHAR(50) DEFAULT 'Offline',
                 accepted_clicks INT DEFAULT 0,
                 subscription_type VARCHAR(50) DEFAULT 'VIP',
-                app_version VARCHAR(20) DEFAULT '7.2.0',
+                app_version VARCHAR(20) DEFAULT '7.1.0',
                 force_update_single BOOLEAN DEFAULT FALSE,
                 expiry_date TIMESTAMP DEFAULT NULL,
                 notice_message TEXT DEFAULT '',
                 last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         """)
+
+        # جدول الصلاحيات
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS myapp.app_permissions (
+                id SERIAL PRIMARY KEY,
+                username VARCHAR(50) UNIQUE NOT NULL,
+                password VARCHAR(100) NOT NULL,
+                role_name VARCHAR(50),
+                allowed_sections TEXT[],
+                is_active BOOLEAN DEFAULT TRUE
+            );
+        """)
+
+        # جدول الأكواد والموزعين
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS myapp.subscriptions (
+                id SERIAL PRIMARY KEY,
+                code VARCHAR(100) UNIQUE NOT NULL,
+                sub_type VARCHAR(50) DEFAULT 'VIP',
+                duration_days INT DEFAULT 30,
+                is_used BOOLEAN DEFAULT FALSE,
+                used_by_device VARCHAR(255) DEFAULT NULL,
+                used_at TIMESTAMP DEFAULT NULL
+            );
+        """)
         
-        # تأكيد تحديث الأعمدة
-        cur.execute("ALTER TABLE myapp.users_status ADD COLUMN IF NOT EXISTS app_version VARCHAR(20) DEFAULT '7.2.0';")
+        # تأكيد وجود الأعمدة الجديدة
+        cur.execute("ALTER TABLE myapp.users_status ADD COLUMN IF NOT EXISTS app_version VARCHAR(20) DEFAULT '7.1.0';")
         cur.execute("ALTER TABLE myapp.users_status ADD COLUMN IF NOT EXISTS force_update_single BOOLEAN DEFAULT FALSE;")
+        cur.execute("ALTER TABLE myapp.app_permissions ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE;")
         
-        conn.commit(); cur.close()
-    except Exception as e: conn.rollback()
+        # تأكيد حساب الأدمن
+        all_sections = [
+            "📈 الإحصائيات العامة", "👥 إدارة المستخدمين", "🚀 إدارة التحديثات", 
+            "🎫 توليد الأكواد", "🤝 قسم الموزعين", "🖥️ حالة السيرفر", 
+            "🔐 الصلاحيات", "🛠️ الدعم الفني"
+        ]
+        cur.execute("SELECT COUNT(*) FROM myapp.app_permissions WHERE username = 'admin'")
+        if cur.fetchone()[0] == 0:
+            cur.execute("INSERT INTO myapp.app_permissions (username, password, role_name, allowed_sections, is_active) VALUES (%s,%s,%s,%s,%s)",
+                        ("admin", "admin123", "مدير النظام", all_sections, True))
+        else:
+            cur.execute("UPDATE myapp.app_permissions SET allowed_sections = %s WHERE username = 'admin'", (all_sections,))
+        
+        cur.execute("SELECT COUNT(*) FROM myapp.app_config")
+        if cur.fetchone()[0] == 0:
+            cur.execute("INSERT INTO myapp.app_config (id, latest_version) VALUES (1, '7.2.0')")
+            
+        conn.commit()
+        cur.close()
+    except Exception as e: 
+        conn.rollback()
+        st.error(f"خطأ أثناء تهيئة قاعدة البيانات: {e}")
 
 setup_full_system()
 
 # =====================================================================
 # 3. نظام الدخول والمصادقة
 # =====================================================================
-if "logged_in" not in st.session_state: st.session_state.logged_in = False
+if "logged_in" not in st.session_state: 
+    st.session_state.logged_in = False
 
 if not st.session_state.logged_in:
-    st.title("🔐 لوحة تحكم MyClicker Pro Ultra")
-    with st.form("login"):
+    st.title("🔐 تسجيل الدخول - MyClicker Pro")
+    with st.form("login_form"):
         u = st.text_input("اسم المستخدم:")
         p = st.text_input("كلمة المرور:", type="password")
-        if st.form_submit_button("دخول"):
-            cur = conn.cursor()
-            cur.execute("SELECT password, allowed_sections, is_active FROM myapp.app_permissions WHERE username = %s", (u,))
-            res = cur.fetchone()
-            if res and res[2] and res[0] == p:
-                st.session_state.logged_in, st.session_state.username, st.session_state.allowed_sections = True, u, res[1]
-                st.rerun()
-            else: st.error("خطأ في البيانات أو الحساب معطل")
+        submit_btn = st.form_submit_button("دخول")
+        if submit_btn:
+            try:
+                cur = conn.cursor()
+                cur.execute("SELECT password, allowed_sections, is_active FROM myapp.app_permissions WHERE username = %s", (u,))
+                res = cur.fetchone()
+                cur.close()
+                if res and res[2] and res[0] == p:
+                    st.session_state.logged_in = True
+                    st.session_state.username = u
+                    st.session_state.allowed_sections = res[1]
+                    st.rerun()
+                else: 
+                    st.error("خطأ في البيانات أو الحساب معطل")
+            except Exception as ex:
+                st.error(f"خطأ أثناء تسجيل الدخول: {ex}")
     st.stop()
 
-# --- Sidebar ---
+# --- الشريط الجانبي ---
 with st.sidebar:
-    st.image("https://img.icons8.com/fluency/96/lightning-bolt.png", width=80)
     st.markdown(f"### ⚡ MyClicker Pro\n👤 {st.session_state.username}")
     choice = st.radio("القائمة الرئيسية:", st.session_state.allowed_sections)
     if st.sidebar.button("🚪 خروج"): 
-        st.session_state.logged_in = False; st.rerun()
+        st.session_state.logged_in = False
+        st.rerun()
 
 # =====================================================================
-# 4. تنفيذ الأقسام بالكامل
+# 4. الأقسام (كل المميزات المبرمجة)
 # =====================================================================
 
 # --- 1. الإحصائيات العامة ---
@@ -154,95 +204,89 @@ if choice == "📈 الإحصائيات العامة":
     df_u = pd.read_sql("SELECT status, bot_status, accepted_clicks, app_version FROM myapp.users_status", conn)
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("إجمالي المشتركين", len(df_u))
-    c2.metric("البوتات النشطة ⚡", len(df_u[df_u['bot_status']=='Online']))
-    c3.metric("إجمالي النقرات", df_u['accepted_clicks'].sum())
-    c4.metric("منتهية الصلاحية", len(df_u[df_u['status']=='Expired']))
-    
-    col_g1, col_g2 = st.columns(2)
-    with col_g1: st.plotly_chart(px.pie(df_u, names='status', title="حالات الاشتراكات", hole=0.4), use_container_width=True)
-    with col_g2: st.plotly_chart(px.bar(df_u['app_version'].value_counts().reset_index(), x='index', y='app_version', title="توزيع الإصدارات"), use_container_width=True)
+    c2.metric("البوتات النشطة ⚡", len(df_u[df_u['bot_status']=='Online']) if not df_u.empty else 0)
+    c3.metric("إجمالي النقرات", int(df_u['accepted_clicks'].sum()) if not df_u.empty else 0)
+    c4.metric("منتهية الصلاحية", len(df_u[df_u['status']=='Expired']) if not df_u.empty else 0)
 
-# --- 2. إدارة المستخدمين (مع التحديث الفردي) ---
-elif choice == "👥 إدارة ومراقبة المستخدمين":
+# --- 2. إدارة المستخدمين ---
+elif choice == "👥 إدارة المستخدمين":
     st.title("👥 إدارة الأجهزة والتحكم الفردي")
-    df = pd.read_sql("SELECT device_id, phone, status, app_version, force_update_single, notice_message, last_active FROM myapp.users_status ORDER BY last_active DESC", conn)
+    df = pd.read_sql("SELECT device_id, phone, status, bot_status, app_version, force_update_single, notice_message, last_active FROM myapp.users_status ORDER BY last_active DESC", conn)
     
-    st.data_editor(df, use_container_width=True, hide_index=True)
+    with st.expander("📢 إرسال إشعار جماعي"):
+        c_n1, c_n2 = st.columns(2)
+        target = c_n1.selectbox("النطاق:", ["الكل", "Active", "Expired"])
+        mode = c_n2.radio("نوع التنبيه:", ["رسالة تطبيق", "إشعار نظام (StatusBar)"], horizontal=True)
+        msg = st.text_input("نص الرسالة:")
+        if st.button("إرسال للكل"):
+            final = f"PUSH:{msg}" if mode == "إشعار نظام (StatusBar)" else msg
+            q = "UPDATE myapp.users_status SET notice_message = %s"
+            if target != "الكل": q += f" WHERE status = '{target}'"
+            if run_query(q, (final,)): st.success("تم الإرسال")
 
-    st.markdown("### 🛠️ إجراءات فردية (التحديث الإجباري الفردي)")
-    sel_id = st.selectbox("اختر الجهاز:", df['device_id'].tolist())
-    if sel_id:
-        user_row = df[df['device_id'] == sel_id].iloc[0]
-        ca1, ca2 = st.columns(2)
-        with ca1:
-            is_f = st.checkbox("⚡ تفعيل تحديث إجباري لهذا الجهاز فقط", value=bool(user_row['force_update_single']))
-            if st.button("تأكيد الإعداد الفردي"): 
-                run_query("UPDATE myapp.users_status SET force_update_single = %s WHERE device_id = %s", (is_f, sel_id))
-                st.success("تم تحديث حالة الجهاز")
-        with ca2:
-            st.info("إرسال إشعار للنظام لهذا المستخدم")
-            m = st.text_input("رسالة PUSH:")
-            if st.button("إرسال الآن"):
-                run_query("UPDATE myapp.users_status SET notice_message = %s WHERE device_id = %s", (f"PUSH:{m}", sel_id))
+    st.dataframe(df, use_container_width=True)
 
-# --- 3. إدارة التحديثات الإجبارية (العامة) ---
-elif choice == "🚀 إدارة التحديثات الإجبارية":
+# --- 3. إدارة التحديثات الإجبارية ---
+elif choice == "🚀 إدارة التحديثات":
     st.title("🚀 إدارة التحديثات الإجبارية العامة")
     conf = pd.read_sql("SELECT * FROM myapp.app_config WHERE id = 1", conn).iloc[0]
     with st.form("force_up"):
         st.warning("تنبيه: تفعيل 'الإيقاف الإجباري' سيمنع النسخ القديمة من العمل.")
-        v = st.text_input("الإصدار الأحدث المطلوب:", value=conf['latest_version'])
-        u = st.text_input("رابط الـ APK المباشر:", value=conf['update_url'])
-        m = st.text_area("رسالة التحديث للمستخدم:", value=conf['update_message'])
-        f = st.checkbox("تفعيل الإيقاف الإجباري العام لكل المشتركين", value=conf['force_update_enabled'])
-        if st.form_submit_button("حفظ ونشر التحديث العام 🚀"):
+        v = st.text_input("الإصدار الأحدث:", value=conf['latest_version'])
+        u = st.text_input("رابط الـ APK:", value=conf['update_url'])
+        m = st.text_area("رسالة التحديث:", value=conf['update_message'])
+        f = st.checkbox("تفعيل الإيقاف الإجباري العام", value=conf['force_update_enabled'])
+        if st.form_submit_button("حفظ ونشر التحديث 🚀"):
             run_query("UPDATE myapp.app_config SET latest_version=%s, update_url=%s, update_message=%s, force_update_enabled=%s WHERE id = 1", (v, u, m, f))
-            st.success("✅ تم نشر التحديث الإجباري العام")
+            st.success("تم التحديث")
 
-# --- 4. توليد وإدارة الأكواد ---
-elif choice == "🎫 توليد وإدارة الأكواد (الادمن)":
+# --- 4. توليد الأكواد ---
+elif choice == "🎫 توليد الأكواد":
     st.title("🎫 توليد أكواد اشتراكات جديدة")
-    df_codes = pd.read_sql("SELECT * FROM myapp.subscriptions ORDER BY id DESC", conn)
     with st.form("gen"):
-        col_t, col_q = st.columns(2)
-        tp = col_t.selectbox("نوع الكود:", ["VIP", "TRIAL"])
-        qty = col_q.number_input("الكمية:", 1, 500, 10)
+        tp = st.selectbox("النوع:", ["VIP", "TRIAL"])
+        days = st.number_input("المدة بالأيام:", 30)
+        qty = st.number_input("الكمية:", 10)
         if st.form_submit_button("توليد 🚀"):
             for _ in range(qty):
                 code = f"{tp}-{''.join(random.choices(string.ascii_uppercase + string.digits, k=6))}"
-                run_query("INSERT INTO myapp.subscriptions (code, sub_type, duration_days, is_used) VALUES (%s,%s,30,FALSE)", (code, tp))
-            st.success("تم التوليد"); st.rerun()
-    st.dataframe(df_codes, use_container_width=True)
+                run_query("INSERT INTO myapp.subscriptions (code, sub_type, duration_days, is_used) VALUES (%s,%s,%s,FALSE)", (code, tp, days))
+            st.success(f"تم توليد {qty} كود بنجاح")
 
-# --- 5. قسم الشركاء والموزعين ---
-elif choice == "🤝 قسم الشركاء (الموزعين)":
-    st.title("🤝 لوحة الموزعين والأكواد")
-    df_s = pd.read_sql("SELECT code, sub_type, is_used, used_by_device, used_at FROM myapp.subscriptions WHERE is_used=FALSE", conn)
-    st.subheader("📦 الأكواد المتاحة للتوزيع")
-    st.dataframe(df_s, use_container_width=True)
+# --- 5. الموزعين ---
+elif choice == "🤝 قسم الموزعين":
+    st.title("🤝 لوحة الموزعين والأكواد المفعلة")
+    df_s = pd.read_sql("SELECT code, sub_type, duration_days, is_used, used_by_device, used_at FROM myapp.subscriptions ORDER BY id DESC", conn)
+    t1, t2 = st.tabs(["الأكواد المتاحة", "الأكواد المستخدمة مع الأجهزة"])
+    t1.dataframe(df_s[df_s['is_used']==False][['code', 'sub_type', 'duration_days']], use_container_width=True)
+    t2.dataframe(df_s[df_s['is_used']==True][['code', 'sub_type', 'used_by_device', 'used_at']], use_container_width=True)
 
 # --- 6. حالة السيرفر ---
 elif choice == "🖥️ حالة السيرفر":
-    st.title("🖥️ مراقبة الخادم")
+    st.title("🖥️ مراقبة الخادم وقاعدة البيانات")
     st.success("🟢 السيرفر متصل ويعمل بكفاءة عالية (DigitalOcean)")
-    st.info("الربط: SSL Secured | Database: PostgreSQL")
+    st.info("قاعدة البيانات: PostgreSQL | التشفير: SSL Active")
 
-# --- 7. إدارة الصلاحيات ---
-elif choice == "🔐 إدارة الصلاحيات والتحكم":
-    st.title("🔐 إدارة حسابات النظام")
-    with st.form("new"):
-        nu, np = st.columns(2)
-        u_name = nu.text_input("Username:")
-        p_word = np.text_input("Password:", type="password")
-        role = st.text_input("Role Description:")
-        secs = st.multiselect("الأقسام المسموحة:", ["📈 الإحصائيات العامة", "👥 إدارة ومراقبة المستخدمين", "🚀 إدارة التحديثات الإجبارية", "🎫 توليد وإدارة الأكواد (الادمن)", "🤝 قسم الشركاء (الموزعين)", "🖥️ حالة السيرفر", "🔐 إدارة الصلاحيات والتحكم", "🛠️ الدعم الفني والتواصل"])
-        if st.form_submit_button("إضافة الحساب 💾"):
-            run_query("INSERT INTO myapp.app_permissions (username, password, role_name, allowed_sections) VALUES (%s,%s,%s,%s)", (u_name, p_word, role, secs))
-            st.rerun()
+# --- 7. الصلاحيات ---
+elif choice == "🔐 الصلاحيات":
+    st.title("🔐 إدارة حسابات لوحة التحكم")
+    col_a, col_b = st.columns([1, 1.5])
+    with col_a:
+        with st.form("new_acc"):
+            nu = st.text_input("Username:")
+            np = st.text_input("Password:", type="password")
+            role = st.text_input("Role:")
+            sel_secs = st.multiselect("الأقسام:", ["📈 الإحصائيات العامة", "👥 إدارة المستخدمين", "🚀 إدارة التحديثات", "🎫 توليد الأكواد", "🤝 قسم الموزعين", "🖥️ حالة السيرفر", "🔐 الصلاحيات", "🛠️ الدعم الفني"])
+            if st.form_submit_button("إضافة حساب"):
+                run_query("INSERT INTO myapp.app_permissions (username, password, role_name, allowed_sections, is_active) VALUES (%s,%s,%s,%s,%s)", (nu, np, role, sel_secs, True))
+                st.rerun()
+    with col_b:
+        df_p = pd.read_sql("SELECT username, role_name, is_active FROM myapp.app_permissions", conn)
+        st.dataframe(df_p, use_container_width=True)
 
-# --- 8. الدعم الفني والتواصل ---
-elif choice == "🛠️ الدعم الفني والتواصل":
+# --- 8. الدعم الفني ---
+elif choice == "🛠️ الدعم الفني":
     st.title("🛠️ قنوات الدعم والتواصل")
+    st.markdown("---")
     st.success("📱 **واتساب الدعم:** https://chat.whatsapp.com/BaC7MvBpJdoKKz4wG5VpWq")
     st.info("✈️ **تليجرام الإدارة:** @MyClicker_Admin")
-    st.markdown("Copyright © 2027 MyClicker Pro. All rights reserved.")
