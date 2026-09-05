@@ -488,64 +488,101 @@ elif page == "🖥️ حالة السيرفر":
 
 elif page == "🔐 إدارة الصلاحيات والتحكم":
     st.title("🔐 إدارة حسابات لوحة التحكم وصلاحيات الأقسام")
-    st.info("من هنا يمكنك إضافة مستخدمين جدد (مثل الشركاء أو الموظفين) وتحديد الأقسام المسموح لهم برؤيتها حصرياً، أو حذف الحسابات.")
+    st.info("من هنا يمكنك إضافة مستخدمين جدد، **تعديل صلاحيات وحسابات المستخدمين الحاليين**، أو حذف الحسابات غير المرغوبة.")
 
-    col_add, col_view = st.columns([1, 1.2])
+    tab_add, tab_edit, tab_view = st.tabs(["➕ إضافة حساب جديد", "✏️ تعديل صلاحيات حساب موجود", "📋 عرض وحذف الحسابات"])
 
-    with col_add:
-        st.subheader("➕ إضافة حساب موظف / شريك جديد")
+    all_secs_list = [
+        "📈 نظرة عامة وإحصائيات الإصدارات",
+        "👥 إدارة ومراقبة المستخدمين والتفعيل", 
+        "📢 مركز الإشعارات الشامل الكامل",
+        "🚀 إدارة التحديثات الإجبارية", 
+        "🎫 توليد وإدارة الأكواد", 
+        "🤝 قسم الشركاء (الموزعين)", 
+        "📈 تحليل البيانات", 
+        "🖥️ حالة السيرفر", 
+        "🔐 إدارة الصلاحيات والتحكم", 
+        "🛠️ الدعم الفني والتواصل"
+    ]
+
+    with tab_add:
+        st.subheader("➕ إنشاء حساب مستخدم / شريك جديد")
         with st.form("add_user_perm"):
             new_u = st.text_input("اسم المستخدم الجديد:")
             new_p = st.text_input("كلمة المرور:", type="password")
             role_desc = st.text_input("مسمى الوظيفة / الوصف:")
             
             st.markdown("**حدد الأقسام المسموح لهذا المستخدم بدخولها:**")
-            p1 = st.checkbox("📈 نظرة عامة وإحصائيات الإصدارات")
-            p2 = st.checkbox("👥 إدارة ومراقبة المستخدمين والتفعيل")
-            p3 = st.checkbox("📢 مركز الإشعارات الشامل الكامل")
-            p4 = st.checkbox("🚀 إدارة التحديثات الإجبارية")
-            p5 = st.checkbox("🎫 توليد وإدارة الأكواد")
-            p6 = st.checkbox("🤝 قسم الشركاء (الموزعين)", value=True)
-            p7 = st.checkbox("📈 تحليل البيانات")
-            p8 = st.checkbox("🖥️ حالة السيرفر")
-            p9 = st.checkbox("🔐 إدارة الصلاحيات والتحكم")
-            p10 = st.checkbox("🛠️ الدعم الفني والتواصل")
+            p_adds = {}
+            for sec in all_secs_list:
+                p_adds[sec] = st.checkbox(sec, value=(sec == "🤝 قسم الشركاء (الموزعين)"))
 
             if st.form_submit_button("حفظ الحساب والصلاحيات 💾"):
                 if not new_u or not new_p:
-                    st.error("يرجى إدخال اسم المستخدم وكلمة المرور على الأقل!")
+                    st.error("يرجى إدخال اسم المستخدم وكلمة المرور!")
                 else:
-                    chosen_secs = []
-                    if p1: chosen_secs.append("📈 نظرة عامة وإحصائيات الإصدارات")
-                    if p2: chosen_secs.append("👥 إدارة ومراقبة المستخدمين والتفعيل")
-                    if p3: chosen_secs.append("📢 مركز الإشعارات الشامل الكامل")
-                    if p4: chosen_secs.append("🚀 إدارة التحديثات الإجبارية")
-                    if p5: chosen_secs.append("🎫 توليد وإدارة الأكواد")
-                    if p6: chosen_secs.append("🤝 قسم الشركاء (الموزعين)")
-                    if p7: chosen_secs.append("📈 تحليل البيانات")
-                    if p8: chosen_secs.append("🖥️ حالة السيرفر")
-                    if p9: chosen_secs.append("🔐 إدارة الصلاحيات والتحكم")
-                    if p10: chosen_secs.append("🛠️ الدعم الفني والتواصل")
-
+                    chosen_secs = [sec for sec, val in p_adds.items() if val]
                     res_add = query(
-                        "INSERT INTO myapp.app_permissions (username, password, role_name, allowed_sections, is_active) VALUES (%s, %s, %s, %s, TRUE) ON CONFLICT (username) DO UPDATE SET password = EXCLUDED.password, role_name = EXCLUDED.role_name, allowed_sections = EXCLUDED.allowed_sections",
+                        "INSERT INTO myapp.app_permissions (username, password, role_name, allowed_sections, is_active) VALUES (%s, %s, %s, %s, TRUE) ON CONFLICT (username) DO NOTHING",
                         (new_u, new_p, role_desc, chosen_secs)
                     )
                     if res_add:
-                        st.success(f"تم حفظ وإضافة حساب ({new_u}) بنجاح!")
+                        st.success(f"تم إنشاء حساب ({new_u}) بنجاح!")
                         st.rerun()
 
-    with col_view:
-        st.subheader("📋 الحسابات المسجلة وصلاحياتها")
+    with tab_edit:
+        st.subheader("✏️ تعديل بيانات وصلاحيات مستخدم موجود")
+        try:
+            if conn and conn.closed == 0:
+                cur = conn.cursor()
+                cur.execute("SELECT username FROM myapp.app_permissions")
+                usernames = [r[0] for r in cur.fetchall()]
+                cur.close()
+
+                if usernames:
+                    selected_edit_user = st.selectbox("اختر المستخدم المراد تعديله:", usernames)
+                    
+                    cur = conn.cursor()
+                    cur.execute("SELECT password, role_name, allowed_sections FROM myapp.app_permissions WHERE username = %s", (selected_edit_user,))
+                    u_data = cur.fetchone()
+                    cur.close()
+
+                    if u_data:
+                        old_pass, old_role, old_secs = u_data[0], u_data[1], u_data[2] if u_data[2] else []
+
+                        with st.form("edit_user_perm_form"):
+                            edit_p = st.text_input("تعديل كلمة المرور:", value=old_pass, type="password")
+                            edit_role = st.text_input("تعديل المسمى الوظيفي:", value=old_role if old_role else "")
+
+                            st.markdown("**تعديل الأقسام المسموح له بدخولها:**")
+                            p_edits = {}
+                            for sec in all_secs_list:
+                                p_edits[sec] = st.checkbox(sec, value=(sec in old_secs), key=f"edit_{selected_edit_user}_{sec}")
+
+                            if st.form_submit_button("حفظ التعديلات والتحديث 🔄"):
+                                updated_secs = [sec for sec, val in p_edits.items() if val]
+                                res_upd = query(
+                                    "UPDATE myapp.app_permissions SET password = %s, role_name = %s, allowed_sections = %s WHERE username = %s",
+                                    (edit_p, edit_role, updated_secs, selected_edit_user)
+                                )
+                                if res_upd:
+                                    st.success(f"✅ تم تحديث صلاحيات الحساب ({selected_edit_user}) بنجاح!")
+                                    st.rerun()
+                else:
+                    st.info("لا توجد حسابات مسجلة بعد.")
+        except Exception as edit_err:
+            st.info(f"جاري تحميل لوحة التعديل: {edit_err}")
+
+    with tab_view:
+        st.subheader("📋 قائمة الحسابات والتحكم بالحذف")
         try:
             if conn and conn.closed == 0:
                 df_perms = pd.read_sql("SELECT id, username, role_name, is_active FROM myapp.app_permissions", conn)
                 st.dataframe(df_perms, use_container_width=True)
 
                 st.markdown("---")
-                st.subheader("⚠️ حذف حساب مستخدم")
-                target_user_del = st.text_input("أدخل اسم المستخدم المراد حذفه:")
-                if st.button("حذف الحساب نهائياً"):
+                target_user_del = st.text_input("أدخل اسم المستخدم المراد حذفه نهائياً:")
+                if st.button("حذف الحساب 🗑️"):
                     if target_user_del == "admin":
                         st.error("لا يمكن حذف حساب الأدمن الرئيسي للنظام!")
                     else:
@@ -555,7 +592,7 @@ elif page == "🔐 إدارة الصلاحيات والتحكم":
             else:
                 st.info("لا يوجد اتصال نشط بقاعدة البيانات.")
         except Exception as e:
-            st.info(f"جاري جلب الصلاحيات: {e}")
+            st.info(f"جاري جلب الحسابات: {e}")
 
 elif page == "🛠️ الدعم الفني والتواصل":
     st.title("🛠️ الدعم الفني وقنوات التواصل")
