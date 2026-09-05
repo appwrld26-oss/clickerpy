@@ -9,6 +9,12 @@ from datetime import datetime, timedelta
 # =====================================================================
 # إعدادات الصفحة والتنسيقات المتجاوبة لكافة المتصفحات والبيئات
 # =====================================================================
+st.set_page_config(
+    page_title="MyClicker Pro Ultra Command Center",
+    layout="wide",
+    page_icon="⚡"
+)
+
 st.markdown("""
     <style>
     header {visibility: hidden;}
@@ -18,7 +24,7 @@ st.markdown("""
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans Arabic", "Cairo", "Tahoma", sans-serif !important;
     }
     
-    /* تثبيت خلفية التطبيق العامة للوضع الفاتح */
+    /* تثبيت خلفية التطبيق العامة للوضع الفاتح ومنع الشاشة السوداء */
     .stApp {
         background-color: #f8fafc !important;
         color: #1e293b !important;
@@ -30,7 +36,7 @@ st.markdown("""
         padding: 10px;
     }
     
-    /* البطاقات والمقاييس */
+    /* بطاقات المقاييس والإحصائيات */
     .stMetric { 
         background-color: #ffffff !important; 
         padding: 15px !important; 
@@ -41,7 +47,7 @@ st.markdown("""
         color: #0f172a !important;
     }
     
-    /* منع ظهور الخانات والفراغات باللون الأسود وضبط الحقول */
+    /* تثبيت ألوان وخلفيات حقول الإدخال والـ Selectbox لمنع ظهورها باللون الأسود */
     input, textarea, select {
         background-color: #ffffff !important;
         color: #0f172a !important;
@@ -57,7 +63,7 @@ st.markdown("""
         color: #0f172a !important;
     }
     
-    /* 📊 تنسيق الجداول (DataFrames) لتكون منسقة وواضحة ونظيفة */
+    /* تنسيق الجداول لتكون بخلفية بيضاء ونظيفة */
     [data-testid="stDataFrame"] {
         background-color: #ffffff !important;
         border-radius: 10px;
@@ -65,7 +71,7 @@ st.markdown("""
         border: 1px solid #e2e8f0;
     }
 
-    /* تنسيق الأزرار */
+    /* الأزرار */
     .stButton button {
         width: 100% !important;
         border-radius: 8px !important;
@@ -87,6 +93,7 @@ st.markdown("""
     }
     </style>
 """, unsafe_allow_html=True)
+
 # =====================================================================
 # الاتصال بقاعدة البيانات مع التخزين المؤقت وتحسين الأداء
 # =====================================================================
