@@ -7,7 +7,7 @@ import string
 from datetime import datetime, timedelta
 
 # =====================================================================
-# إعدادات الصفحة (يجب أن تكون أول أمر Streamlit في الملف تماماً)
+# إعدادات الصفحة
 # =====================================================================
 st.set_page_config(
     page_title="MyClicker Pro Ultra Command Center",
@@ -27,7 +27,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # =====================================================================
-# الاتصال بقاعدة البيانات (DigitalOcean PostgreSQL)
+# الاتصال بقاعدة البيانات (مع تخزين الاتصال مؤقتاً لسرعة الاستجابة)
 # =====================================================================
 @st.cache_resource
 def get_conn():
@@ -38,9 +38,10 @@ def get_conn():
             password="1tHwqXCgn8BS6iTm942V3f7a",
             host="myclicker-db-rd7ky.db1.ondigitalocean.com",
             port="5432",
-            sslmode="require"
+            sslmode="require",
+            connect_timeout=5
         )
-    except Exception as e:
+    except Exception:
         return None
 
 conn = get_conn()
@@ -50,6 +51,10 @@ if not conn:
 
 def query(sql, params=()):
     try:
+        # التأكد من إعادة الاتصال إذا انقطع
+        global conn
+        if conn.closed != 0:
+            conn = get_conn()
         cur = conn.cursor()
         cur.execute(sql, params)
         conn.commit()
@@ -60,8 +65,31 @@ def query(sql, params=()):
         st.error(f"خطأ في تنفيذ قاعدة البيانات: {e}")
         return False
 
+# دالة جلب البيانات مع تخزين مؤقت سريع (TTL = 10 ثوانٍ لضمان خفة الأداء)
+@st.cache_data(ttl=10)
+def load_users_data():
+    try:
+        return pd.read_sql("SELECT device_id, phone, status, subscription_type, expiry_date, bot_status, app_version, accepted_clicks, last_active FROM myapp.users_status ORDER BY last_active DESC", conn)
+    except Exception:
+        return pd.DataFrame()
+
+@st.cache_data(ttl=10)
+def load_subs_data():
+    try:
+        return pd.read_sql("SELECT id, code, sub_type, duration_days, is_used, used_by_device, used_at FROM myapp.subscriptions ORDER BY id DESC", conn)
+    except Exception:
+        return pd.DataFrame()
+
+@st.cache_data(ttl=15)
+def load_config_data():
+    try:
+        config_rows = pd.read_sql("SELECT key, value FROM myapp.app_config", conn)
+        return dict(zip(config_rows['key'], config_rows['value']))
+    except Exception:
+        return {'latest_version': '7.1.0', 'update_url': '', 'force_update': 'true', 'update_message': 'يرجى التحديث'}
+
 # =====================================================================
-# تهيئة الجداول التلقائية ونظام الإصلاح الذاتي (Self-Healing)
+# تهيئة الجداول التلقائية (تنفذ لمرة واحدة عند التشغيل)
 # =====================================================================
 try:
     cur = conn.cursor()
@@ -99,7 +127,7 @@ try:
     
     conn.commit()
     cur.close()
-except Exception as e:
+except Exception:
     conn.rollback()
 
 # =====================================================================
@@ -131,7 +159,8 @@ if not st.session_state.logged:
 # الشريط الجانبي (Sidebar)
 # =====================================================================
 st.sidebar.markdown(f"### ⚡ MyClicker Pro\n👤 المستخدم: **{st.session_state.user}**")
-if st.sidebar.button("🔄 تحديث البيانات الشاملة"):
+if st.sidebar.button("🔄 مسح الذاكرة المؤقتة والتحديث"):
+    st.cache_data.clear()
     st.rerun()
 
 page = st.sidebar.radio("القائمة الرئيسية:", st.session_state.sections)
@@ -146,14 +175,8 @@ if st.sidebar.button("🚪 تسجيل الخروج"):
 
 if page == "📈 نظرة عامة وإحصائيات الإصدارات":
     st.title("📈 لوحة المؤشرات الحية وإحصائيات إصدارات التطبيق")
-    st.markdown("متابعة دقيقة لأداء المنصة، توزيع إصدارات المستخدمين، وحالة الأجهزة المتصلة.")
-
-    try:
-        df_u = pd.read_sql("SELECT device_id, status, bot_status, app_version, accepted_clicks, last_active FROM myapp.users_status", conn)
-        df_c = pd.read_sql("SELECT is_used FROM myapp.subscriptions", conn)
-    except Exception:
-        df_u = pd.DataFrame()
-        df_c = pd.DataFrame()
+    
+    df_u = load_users_data()
 
     total_subs = len(df_u)
     active_subs = len(df_u[df_u['status'] == 'Active']) if not df_u.empty else 0
@@ -171,7 +194,7 @@ if page == "📈 نظرة عامة وإحصائيات الإصدارات":
     if not df_u.empty and 'app_version' in df_u.columns:
         c_v1, c_v2 = st.columns(2)
         with c_v1:
-            st.subheader("📊 تحليل وتوزيع إصدارات التطبيق لدى المستخدمين")
+            st.subheader("📊 تحليل وتوزيع إصدارات التطبيق")
             version_counts = df_u['app_version'].value_counts().reset_index()
             version_counts.columns = ['Version', 'Count']
             fig_ver = px.pie(version_counts, names='Version', values='Count', title="نسبة انتشار إصدارات التطبيق", hole=0.4)
@@ -184,15 +207,12 @@ if page == "📈 نظرة عامة وإحصائيات الإصدارات":
             fig_bot = px.bar(bot_counts, x='Status', y='Count', title="مقارنة البوتات (Online / Offline)", color='Status')
             st.plotly_chart(fig_bot, use_container_width=True)
     else:
-        st.info("لا توجد بيانات كافية لعرض رسوم الإصدارات حتى الآن.")
+        st.info("لا توجد بيانات كافية لعرس الرسومات البيانية.")
 
 elif page == "👥 إدارة ومراقبة المستخدمين والتفعيل":
     st.title("👥 إدارة المستخدمين، الأجهزة، والتحكم ببيانات التفعيل")
     
-    try:
-        df_users = pd.read_sql("SELECT device_id, phone, status, subscription_type, expiry_date, bot_status, app_version, accepted_clicks, last_active FROM myapp.users_status ORDER BY last_active DESC", conn)
-    except Exception:
-        df_users = pd.DataFrame()
+    df_users = load_users_data()
 
     if not df_users.empty:
         st.dataframe(df_users, use_container_width=True)
@@ -227,25 +247,20 @@ elif page == "👥 إدارة ومراقبة المستخدمين والتفعي
                 """, (new_phone, new_status, new_sub_type, full_expiry, target_device))
                 
                 if res:
+                    st.cache_data.clear()
                     st.success("✅ تم تحديث بيانات تفعيل المستخدم بنجاح!")
                     st.rerun()
     else:
         st.info("لا توجد بيانات مسجلة للمستخدمين حالياً.")
 
 elif page == "📢 مركز الإشعارات المتقدم":
-    st.title("📢 مركز الإشعارات المتقدم (فردي - مجموعات مخصصة - للكل)")
-    st.markdown("إرسال تنبيهات فورية تظهر للمستخدمين داخل التطبيق أو كرسائل حوارية (Dialog).")
-
-    try:
-        df_notif_users = pd.read_sql("SELECT device_id, phone, status, subscription_type FROM myapp.users_status", conn)
-    except Exception:
-        df_notif_users = pd.DataFrame()
+    st.title("📢 مركز الإشعارات المتقدم")
+    df_notif_users = load_users_data()
 
     notif_target_type = st.radio("حدد نطاق الإرسال:", ["إشعار لجهاز/مستخدم فردي", "إشعار لمجموعة محددة (حسب الحالة أو النوع)", "إشعار عام لجميع المشتركين"], horizontal=True)
 
     with st.form("advanced_notification_form"):
         msg_content = st.text_area("نص الإشعار المراد إرساله:")
-        
         target_device_id = None
         target_group = None
 
@@ -272,7 +287,6 @@ elif page == "📢 مركز الإشعارات المتقدم":
                 success_flag = False
                 if notif_target_type == "إشعار لجهاز/مستخدم فردي" and target_device_id:
                     success_flag = query("UPDATE myapp.users_status SET notice_message = %s WHERE device_id = %s", (msg_content, target_device_id))
-                    
                 elif notif_target_type == "إشعار لمجموعة محددة (حسب الحالة أو النوع)":
                     if "Active" in target_group:
                         success_flag = query("UPDATE myapp.users_status SET notice_message = %s WHERE status = 'Active'", (msg_content,))
@@ -282,32 +296,25 @@ elif page == "📢 مركز الإشعارات المتقدم":
                         success_flag = query("UPDATE myapp.users_status SET notice_message = %s WHERE subscription_type = 'VIP'", (msg_content,))
                     elif "TRIAL" in target_group:
                         success_flag = query("UPDATE myapp.users_status SET notice_message = %s WHERE subscription_type = 'TRIAL'", (msg_content,))
-                        
                 elif notif_target_type == "إشعار عام لجميع المشتركين":
                     success_flag = query("UPDATE myapp.users_status SET notice_message = %s", (msg_content,))
 
                 if success_flag:
-                    st.success("✅ تم إرسال الإشعار بنجاح إلى الجهة المستهدفة!")
+                    st.success("✅ تم إرسال الإشعار بنجاح!")
                 else:
-                    st.error("فشل إرسال الإشعار، يرجى المحاولة لاحقاً.")
+                    st.error("فشل إرسال الإشعار.")
 
 elif page == "🚀 إدارة التحديثات الإجبارية":
-    st.title("🚀 إدارة التحديثات الإجبارية (النافذة المنبثقة وأزرار التحميل)")
-    st.info("💡 هذه الإعدادات متزامنة مع السيرفر وتجبر النسخ القديمة على فتح نافذة التحميل المنبثقة مع زر مباشر.")
-    
-    try:
-        config_rows = pd.read_sql("SELECT * FROM myapp.app_config", conn)
-        conf = dict(zip(config_rows['key'], config_rows['value']))
-    except Exception:
-        conf = {'latest_version': '7.1.0', 'update_url': '', 'force_update': 'true', 'update_message': 'يرجى التحديث'}
+    st.title("🚀 إدارة التحديثات الإجبارية")
+    conf = load_config_data()
     
     with st.form("upd_form_node"):
-        v = st.text_input("رقم الإصدار الأحدث (مثل 7.2.0):", value=conf.get('latest_version', '7.1.0'))
-        url = st.text_input("رابط التحميل المباشر للـ APK (زر التحميل):", value=conf.get('update_url', ''))
+        v = st.text_input("رقم الإصدار الأحدث:", value=conf.get('latest_version', '7.1.0'))
+        url = st.text_input("رابط التحميل المباشر للـ APK:", value=conf.get('update_url', ''))
         msg = st.text_area("رسالة النافذة المنبثقة الإجبارية:", value=conf.get('update_message', 'يرجى تحديث التطبيق للاستمرار!'))
         forced = st.selectbox("حالة التحديث الإجباري:", ["true", "false"], index=0 if conf.get('force_update', 'true') == 'true' else 1)
         
-        if st.form_submit_button("حفظ ونشر التحديث الإجباري لكافة الأجهزة 🚀"):
+        if st.form_submit_button("حفظ ونشر التحديث الإجباري 🚀"):
             query("INSERT INTO myapp.app_config (key, value) VALUES ('latest_version', %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", (v,))
             query("INSERT INTO myapp.app_config (key, value) VALUES ('update_url', %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", (url,))
             query("INSERT INTO myapp.app_config (key, value) VALUES ('update_message', %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", (msg,))
@@ -316,19 +323,9 @@ elif page == "🚀 إدارة التحديثات الإجبارية":
             dialog_cmd = f"DIALOG_UPDATE:version={v}|url={url}|msg={msg}"
             query("UPDATE myapp.users_status SET notice_message = %s", (dialog_cmd,))
             
-            st.success("✅ تم تحديث ونشر إعدادات التحديث الإجباري بنجاح عبر السيرفر!")
+            st.cache_data.clear()
+            st.success("✅ تم تحديث ونشر إعدادات التحديث الإجباري بنجاح!")
             st.rerun()
-            
-    st.markdown("---")
-    st.subheader("💡 معاينة شكل التنبيه والزر المنبثق للمستخدم:")
-    if url:
-        st.markdown(f"""
-        > **{conf.get('update_message', 'يرجى تحديث التطبيق!')}**
-        > 
-        > [![تحميل التحديث الآن](https://img.shields.io/badge/📥_تحميل_التحديث_الآن-أضغط_هنا-blue?style=for-the-badge)]({url})
-        """)
-    else:
-        st.info("قم بإدخال رابط التحميل لمعاينة الزر هنا.")
 
 elif page == "🎫 توليد وإدارة الأكواد":
     st.title("🎫 توليد وإدارة الأكواد والاشتراكات")
@@ -340,23 +337,24 @@ elif page == "🎫 توليد وإدارة الأكواد":
             for _ in range(qty):
                 code = tp[:3].upper() + ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
                 query("INSERT INTO myapp.subscriptions (code, sub_type, duration_days, is_used) VALUES (%s, %s, %s, FALSE) ON CONFLICT DO NOTHING", (code, tp, days))
+            st.cache_data.clear()
             st.success(f"تم توليد {qty} كود اشتراك بنجاح.")
             st.rerun()
 
 elif page == "🤝 قسم الشركاء (الموزعين)":
-    st.title("🤝 لوحة الشركاء والموزعين الشاملة")
-    try:
-        df_s = pd.read_sql("SELECT code, sub_type, duration_days, is_used, used_by_device, used_at FROM myapp.subscriptions ORDER BY id DESC", conn)
+    st.title("🤝 لوحة الشركاء والموزعين")
+    df_s = load_subs_data()
+    if not df_s.empty:
         t1, t2 = st.tabs(["📦 الأكواد المتاحة للتوزيع", "✅ الأكواد المستخدمة من العملاء"])
         t1.dataframe(df_s[df_s['is_used'] == False], use_container_width=True)
         t2.dataframe(df_s[df_s['is_used'] == True], use_container_width=True)
-    except Exception:
+    else:
         st.info("لا توجد أكواد مسجلة حالياً.")
 
 elif page == "📈 تحليل البيانات":
     st.title("📈 تحليل البيانات وأوقات الذروة للطلبات")
     try:
-        df_orders = pd.read_sql("SELECT order_time, price FROM myapp.accepted_orders", conn)
+        df_orders = pd.read_sql("SELECT order_time, price FROM myapp.accepted_orders LIMIT 2000", conn)
         if not df_orders.empty:
             df_orders['hour'] = pd.to_datetime(df_orders['order_time']).dt.hour
             fig = px.bar(df_orders.groupby('hour').size().reset_index(name='count'), x='hour', y='count', title="أوقات الذروة للطلبات المقبولة حسب الساعة")
