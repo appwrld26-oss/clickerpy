@@ -396,7 +396,7 @@ elif choice == "🚀 إدارة التحديثات الإجبارية":
         config = {'latest_version': '7.1.0', 'update_url': '', 'update_message': '', 'force_update_enabled': False}
     
     with st.form("update_form"):
-        new_ver = st.text_input("رقم الإصدار الأحدث (مثل 7.2.0):", value=config['latest_version'])
+        new_ver = st.text_input("رقم الإصدار الأحدث مثل (7.2.0):", value=config['latest_version'])
         new_url = st.text_input("رابط تحميل الـ APK المباشر:", value=config['update_url'])
         new_msg = st.text_area("رسالة التنبيه للمستخدم عند التحديث:", value=config['update_message'])
         is_forced = st.checkbox("تفعيل الإيقاف الإجباري العام للنسخ القديمة", value=config['force_update_enabled'])
@@ -416,7 +416,7 @@ elif choice == "🚀 إدارة التحديثات الإجبارية":
     else:
         st.info("لم يتم تعيين رابط تحميل مباشر للنسخة بعد.")
 
-# 3. توليد وإدارة الأكواد (مع جداول الأكواد والأجهزة التي قامت بتفعيلها)
+# 3. توليد وإدارة الأكواد
 elif choice == "🎫 توليد وإدارة الأكواد (الادمن)":
     st.title("🎫 لوحة توليد وإدارة الأكواد والأجهزة المفعلة")
     df_codes = pd.read_sql("SELECT * FROM myapp.subscriptions ORDER BY id DESC", conn)
@@ -449,17 +449,49 @@ elif choice == "🎫 توليد وإدارة الأكواد (الادمن)":
         else:
             st.info("لا توجد أكواد مستعملة حتى الآن.")
 
-# 4. قسم الشركاء
+# 4. قسم الشركاء (منسق ومنظم بدقة مع الأكواد المتاحة والمفعلة والأجهزة المستخدمة لها)
 elif choice == "🤝 قسم الشركاء (الموزعين)":
-    st.title("🤝 لوحة الشركاء والموزعين")
-    df_codes = pd.read_sql("SELECT code, sub_type, duration_days, is_used FROM myapp.subscriptions ORDER BY id DESC", conn)
-    c1, c2 = st.columns(2)
-    c1.metric("📦 الأكواد المتاحة", len(df_codes[df_codes['is_used'] == False]) if not df_codes.empty else 0)
-    c2.metric("✅ الأكواد المفعلة", len(df_codes[df_codes['is_used'] == True]) if not df_codes.empty else 0)
-    if not df_codes.empty:
-        st.dataframe(df_codes[df_codes['is_used'] == False][['code', 'sub_type', 'duration_days']], use_container_width=True)
-    else:
-        st.info("لا توجد أكواد متاحة للعرض.")
+    st.title("🤝 لوحة الشركاء والموزعين الشاملة")
+    st.markdown("مرحباً بك في قسم الشركاء. يمكنك متابعة حالة الأكواد المتاحة، الأكواد التي تم تفعيلها، والأجهزة التي قامت باستخدامها بدقة.")
+    
+    df_codes = pd.read_sql("SELECT id, code, sub_type, duration_days, is_used, used_by_device, used_at FROM myapp.subscriptions ORDER BY id DESC", conn)
+    
+    # بطاقات إحصائية للشركاء
+    total_codes = len(df_codes) if not df_codes.empty else 0
+    available_codes = len(df_codes[df_codes['is_used'] == False]) if not df_codes.empty else 0
+    used_codes = len(df_codes[df_codes['is_used'] == True]) if not df_codes.empty else 0
+
+    p_col1, p_col2, p_col3 = st.columns(3)
+    p_col1.metric("📦 إجمالي الأكواد", total_codes)
+    p_col2.metric("🟢 الأكواد المتاحة للتوزيع", available_codes)
+    p_col3.metric("✅ الأكواد المفعلة من العملاء", used_codes)
+    
+    st.markdown("---")
+    
+    # تبويبات منسقة للاطلاع على الأكواد
+    partner_tab1, partner_tab2 = st.tabs(["📦 الأكواد المتاحة (غير المستخدمة)", "✅ الأكواد المفعلة مع الأجهزة المستخدمة"])
+    
+    with partner_tab1:
+        st.subheader("الأكواد الجاهزة للتوزيع والمنح للمشتركين")
+        if not df_codes.empty and available_codes > 0:
+            st.dataframe(
+                df_codes[df_codes['is_used'] == False][['code', 'sub_type', 'duration_days']], 
+                use_container_width=True, 
+                hide_index=True
+            )
+        else:
+            st.info("لا توجد أكواد متاحة حالياً. يرجى مراجعة الإدارة لتوليد أكواد جديدة.")
+            
+    with partner_tab2:
+        st.subheader("سجل الأكواد المفعلة وأسماء الأجهزة التي قامت بتفعيلها")
+        if not df_codes.empty and used_codes > 0:
+            st.dataframe(
+                df_codes[df_codes['is_used'] == True][['code', 'sub_type', 'used_by_device', 'used_at']], 
+                use_container_width=True, 
+                hide_index=True
+            )
+        else:
+            st.info("لم يتم تفعيل أي كود حتى الآن.")
 
 # 5. تحليل البيانات
 elif choice == "📈 تحليل البيانات":
