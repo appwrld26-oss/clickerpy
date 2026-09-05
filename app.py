@@ -167,7 +167,7 @@ def load_config_data():
     return {'latest_version': '7.1.0', 'update_url': '', 'force_update': 'true', 'update_message': 'يرجى التحديث'}
 
 # =====================================================================
-# تهيئة الجداول وتحديث الهيكل الذاتي (بشكل آمن يحمى من انقطاع الاتصال)
+# تهيئة الجداول وتحديث الهيكل الذاتي وصلاحيات الأدمن
 # =====================================================================
 try:
     if conn and conn.closed == 0:
@@ -234,7 +234,7 @@ if not st.session_state.logged:
                     if res and res[2] and res[0] == p:
                         st.session_state.logged = True
                         st.session_state.user = u
-                        st.session_state.sections = res[1]
+                        st.session_state.sections = res[1] if res[1] else []
                         st.rerun()
                     else:
                         st.error("بيانات الدخول غير صحيحة أو الحساب معطل.")
@@ -245,14 +245,22 @@ if not st.session_state.logged:
     st.stop()
 
 # =====================================================================
-# الشريط الجانبي (Sidebar)
+# الشريط الجانبي (Sidebar والصلاحيات)
 # =====================================================================
 st.sidebar.markdown(f"### ⚡ MyClicker Pro\n👤 المستخدم: **{st.session_state.user}**")
 if st.sidebar.button("🔄 مسح الذاكرة المؤقتة والتحديث"):
     st.cache_data.clear()
     st.rerun()
 
-page = st.sidebar.radio("القائمة الرئيسية:", st.session_state.sections)
+user_allowed_sections = st.session_state.get('sections', [])
+if not user_allowed_sections:
+    st.warning("⚠️ ليس لديك أي صلاحيات لعرض الأقسام. يرجى مراجعة مدير النظام.")
+    if st.sidebar.button("🚪 تسجيل الخروج"):
+        st.session_state.logged = False
+        st.rerun()
+    st.stop()
+
+page = st.sidebar.radio("القائمة الرئيسية:", user_allowed_sections)
 
 if st.sidebar.button("🚪 تسجيل الخروج"):
     st.session_state.logged = False
@@ -345,7 +353,6 @@ elif page == "📢 مركز الإشعارات الشامل الكامل":
     st.info("💡 تحكم كامل بإرسال الإشعارات والرسائل المنبثقة الفورية للأجهزة مع إمكانية متابعة الإشعارات المعلقة وحذفها.")
     
     df_notif_users = load_users_data()
-
     tab_send, tab_manage = st.tabs(["📤 إرسال إشعار جديد", "📋 إدارة ومتابعة الإشعارات المعلقة"])
 
     with tab_send:
@@ -480,15 +487,75 @@ elif page == "🖥️ حالة السيرفر":
     st.info("قاعدة البيانات: PostgreSQL | التشفير: SSL Active | بيئة العمل: Production")
 
 elif page == "🔐 إدارة الصلاحيات والتحكم":
-    st.title("🔐 إدارة حسابات لوحة التحكم والصلاحيات")
-    try:
-        if conn and conn.closed == 0:
-            df_p = pd.read_sql("SELECT username, role_name, is_active FROM myapp.app_permissions", conn)
-            st.dataframe(df_p, use_container_width=True)
-        else:
-            st.info("لا يوجد اتصال نشط بقاعدة البيانات.")
-    except Exception:
-        st.info("لا توجد حسابات صلاحيات مسجلة.")
+    st.title("🔐 إدارة حسابات لوحة التحكم وصلاحيات الأقسام")
+    st.info("من هنا يمكنك إضافة مستخدمين جدد (مثل الشركاء أو الموظفين) وتحديد الأقسام المسموح لهم برؤيتها حصرياً، أو حذف الحسابات.")
+
+    col_add, col_view = st.columns([1, 1.2])
+
+    with col_add:
+        st.subheader("➕ إضافة حساب موظف / شريك جديد")
+        with st.form("add_user_perm"):
+            new_u = st.text_input("اسم المستخدم الجديد:")
+            new_p = st.text_input("كلمة المرور:", type="password")
+            role_desc = st.text_input("مسمى الوظيفة / الوصف:")
+            
+            st.markdown("**حدد الأقسام المسموح لهذا المستخدم بدخولها:**")
+            p1 = st.checkbox("📈 نظرة عامة وإحصائيات الإصدارات")
+            p2 = st.checkbox("👥 إدارة ومراقبة المستخدمين والتفعيل")
+            p3 = st.checkbox("📢 مركز الإشعارات الشامل الكامل")
+            p4 = st.checkbox("🚀 إدارة التحديثات الإجبارية")
+            p5 = st.checkbox("🎫 توليد وإدارة الأكواد")
+            p6 = st.checkbox("🤝 قسم الشركاء (الموزعين)", value=True)
+            p7 = st.checkbox("📈 تحليل البيانات")
+            p8 = st.checkbox("🖥️ حالة السيرفر")
+            p9 = st.checkbox("🔐 إدارة الصلاحيات والتحكم")
+            p10 = st.checkbox("🛠️ الدعم الفني والتواصل")
+
+            if st.form_submit_button("حفظ الحساب والصلاحيات 💾"):
+                if not new_u or not new_p:
+                    st.error("يرجى إدخال اسم المستخدم وكلمة المرور على الأقل!")
+                else:
+                    chosen_secs = []
+                    if p1: chosen_secs.append("📈 نظرة عامة وإحصائيات الإصدارات")
+                    if p2: chosen_secs.append("👥 إدارة ومراقبة المستخدمين والتفعيل")
+                    if p3: chosen_secs.append("📢 مركز الإشعارات الشامل الكامل")
+                    if p4: chosen_secs.append("🚀 إدارة التحديثات الإجبارية")
+                    if p5: chosen_secs.append("🎫 توليد وإدارة الأكواد")
+                    if p6: chosen_secs.append("🤝 قسم الشركاء (الموزعين)")
+                    if p7: chosen_secs.append("📈 تحليل البيانات")
+                    if p8: chosen_secs.append("🖥️ حالة السيرفر")
+                    if p9: chosen_secs.append("🔐 إدارة الصلاحيات والتحكم")
+                    if p10: chosen_secs.append("🛠️ الدعم الفني والتواصل")
+
+                    res_add = query(
+                        "INSERT INTO myapp.app_permissions (username, password, role_name, allowed_sections, is_active) VALUES (%s, %s, %s, %s, TRUE) ON CONFLICT (username) DO UPDATE SET password = EXCLUDED.password, role_name = EXCLUDED.role_name, allowed_sections = EXCLUDED.allowed_sections",
+                        (new_u, new_p, role_desc, chosen_secs)
+                    )
+                    if res_add:
+                        st.success(f"تم حفظ وإضافة حساب ({new_u}) بنجاح!")
+                        st.rerun()
+
+    with col_view:
+        st.subheader("📋 الحسابات المسجلة وصلاحياتها")
+        try:
+            if conn and conn.closed == 0:
+                df_perms = pd.read_sql("SELECT id, username, role_name, is_active FROM myapp.app_permissions", conn)
+                st.dataframe(df_perms, use_container_width=True)
+
+                st.markdown("---")
+                st.subheader("⚠️ حذف حساب مستخدم")
+                target_user_del = st.text_input("أدخل اسم المستخدم المراد حذفه:")
+                if st.button("حذف الحساب نهائياً"):
+                    if target_user_del == "admin":
+                        st.error("لا يمكن حذف حساب الأدمن الرئيسي للنظام!")
+                    else:
+                        if query("DELETE FROM myapp.app_permissions WHERE username = %s", (target_user_del,)):
+                            st.success(f"تم حذف الحساب ({target_user_del}) بنجاح.")
+                            st.rerun()
+            else:
+                st.info("لا يوجد اتصال نشط بقاعدة البيانات.")
+        except Exception as e:
+            st.info(f"جاري جلب الصلاحيات: {e}")
 
 elif page == "🛠️ الدعم الفني والتواصل":
     st.title("🛠️ الدعم الفني وقنوات التواصل")
