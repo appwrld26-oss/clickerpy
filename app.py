@@ -7,14 +7,19 @@ import string
 from datetime import datetime, timedelta
 
 # =====================================================================
-# إعدادات الصفحة
+# إعدادات الصفحة والتنسيقات المتجاوبة لكافة المتصفحات والبيئات
 # =====================================================================
+st.set_page_config(
+    page_title="MyClicker Pro Ultra Command Center",
+    layout="wide",
+    page_icon="⚡"
+)
+
 st.markdown("""
     <style>
-    /* إخفاء شريط Streamlit العلوي */
     header {visibility: hidden;}
     
-    /* فرض خطوط النظام الآمنة والداعمة للغة العربية عبر مختلف البيئات (Windows, iOS, Android, Mac) */
+    /* خطوط النظام الآمنة والداعمة للغة العربية عبر مختلف البيئات */
     * {
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans Arabic", "Cairo", "Tahoma", sans-serif !important;
         direction: rtl;
@@ -50,7 +55,7 @@ st.markdown("""
         font-weight: 600 !important;
     }
     
-    /* تنسيق حقول الإدخال والـ Selectbox لتناسب مختلف البيئات */
+    /* تنسيق حقول الإدخال والـ Selectbox */
     input, select, textarea {
         border-radius: 8px !important;
         text-align: right !important;
@@ -60,6 +65,7 @@ st.markdown("""
     .stTabs [data-baseweb="tab-list"] { 
         gap: 8px; 
         flex-wrap: wrap;
+        direction: rtl;
     }
     
     .stTabs [data-baseweb="tab"] { 
@@ -71,8 +77,9 @@ st.markdown("""
     }
     </style>
 """, unsafe_allow_html=True)
+
 # =====================================================================
-# الاتصال بقاعدة البيانات (مع تخزين الاتصال مؤقتاً لسرعة الاستجابة)
+# الاتصال بقاعدة البيانات مع التخزين المؤقت وتحسين الأداء
 # =====================================================================
 @st.cache_resource
 def get_conn():
@@ -109,11 +116,10 @@ def query(sql, params=()):
         st.error(f"خطأ في تنفيذ قاعدة البيانات: {e}")
         return False
 
-# دالة جلب البيانات مع تخزين مؤقت سريع (TTL = 10 ثوانٍ لضمان خفة الأداء)
 @st.cache_data(ttl=10)
 def load_users_data():
     try:
-        return pd.read_sql("SELECT device_id, phone, status, subscription_type, expiry_date, bot_status, app_version, accepted_clicks, last_active FROM myapp.users_status ORDER BY last_active DESC", conn)
+        return pd.read_sql("SELECT device_id, phone, status, subscription_type, expiry_date, bot_status, app_version, accepted_clicks, last_active, notice_message FROM myapp.users_status ORDER BY last_active DESC", conn)
     except Exception:
         return pd.DataFrame()
 
@@ -133,7 +139,7 @@ def load_config_data():
         return {'latest_version': '7.1.0', 'update_url': '', 'force_update': 'true', 'update_message': 'يرجى التحديث'}
 
 # =====================================================================
-# تهيئة الجداول التلقائية (تنفذ لمرة واحدة عند التشغيل)
+# تهيئة الجداول وتحديث الهيكل الذاتي
 # =====================================================================
 try:
     cur = conn.cursor()
@@ -153,7 +159,7 @@ try:
     all_secs = [
         "📈 نظرة عامة وإحصائيات الإصدارات",
         "👥 إدارة ومراقبة المستخدمين والتفعيل", 
-        "📢 مركز الإشعارات المتقدم",
+        "📢 مركز الإشعارات الشامل الكامل",
         "🚀 إدارة التحديثات الإجبارية", 
         "🎫 توليد وإدارة الأكواد", 
         "🤝 قسم الشركاء (الموزعين)", 
@@ -175,7 +181,7 @@ except Exception:
     conn.rollback()
 
 # =====================================================================
-# نظام المصادقة والأمان
+# نظام المصادقة
 # =====================================================================
 if "logged" not in st.session_state:
     st.session_state.logged = False
@@ -214,24 +220,25 @@ if st.sidebar.button("🚪 تسجيل الخروج"):
     st.rerun()
 
 # =====================================================================
-# الأقسام الاحترافية للوحة التحكم
+# الأقسام البرمجية للوحة التحكم
 # =====================================================================
 
 if page == "📈 نظرة عامة وإحصائيات الإصدارات":
     st.title("📈 لوحة المؤشرات الحية وإحصائيات إصدارات التطبيق")
-    
     df_u = load_users_data()
 
     total_subs = len(df_u)
     active_subs = len(df_u[df_u['status'] == 'Active']) if not df_u.empty else 0
+    expired_subs = len(df_u[df_u['status'] == 'Expired']) if not df_u.empty else 0
     online_bots = len(df_u[df_u['bot_status'] == 'Online']) if not df_u.empty else 0
     total_clicks = int(df_u['accepted_clicks'].sum()) if not df_u.empty else 0
 
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("👥 إجمالي الأجهزة المسجلة", total_subs)
-    col2.metric("🟢 الأجهزة النشطة", active_subs)
-    col3.metric("⚡ البوتات المتصلة (Online)", online_bots)
-    col4.metric("🖱️ إجمالي النقرات المقبولة", total_clicks)
+    col1, col2, col3, col4, col5 = st.columns(5)
+    col1.metric("👥 إجمالي الأجهزة", total_subs)
+    col2.metric("🟢 النشطة (Active)", active_subs)
+    col3.metric("🔴 المنتهية (Expired)", expired_subs)
+    col4.metric("⚡ البوتات (Online)", online_bots)
+    col5.metric("🖱️ إجمالي النقرات", total_clicks)
 
     st.markdown("---")
     
@@ -250,12 +257,9 @@ if page == "📈 نظرة عامة وإحصائيات الإصدارات":
             bot_counts.columns = ['Status', 'Count']
             fig_bot = px.bar(bot_counts, x='Status', y='Count', title="مقارنة البوتات (Online / Offline)", color='Status')
             st.plotly_chart(fig_bot, use_container_width=True)
-    else:
-        st.info("لا توجد بيانات كافية لعرض الرسوم البيانية.")
 
 elif page == "👥 إدارة ومراقبة المستخدمين والتفعيل":
     st.title("👥 إدارة المستخدمين، الأجهزة، والتحكم ببيانات التفعيل")
-    
     df_users = load_users_data()
 
     if not df_users.empty:
@@ -297,56 +301,76 @@ elif page == "👥 إدارة ومراقبة المستخدمين والتفعي
     else:
         st.info("لا توجد بيانات مسجلة للمستخدمين حالياً.")
 
-elif page == "📢 مركز الإشعارات المتقدم":
-    st.title("📢 مركز الإشعارات المتقدم")
+elif page == "📢 مركز الإشعارات الشامل الكامل":
+    st.title("📢 مركز الإشعارات الشامل المتقدم")
+    st.info("💡 تحكم كامل بإرسال الإشعارات والرسائل المنبثقة الفورية للأجهزة مع إمكانية متابعة الإشعارات المعلقة وحذفها.")
+    
     df_notif_users = load_users_data()
 
-    notif_target_type = st.radio("حدد نطاق الإرسال:", ["إشعار لجهاز/مستخدم فردي", "إشعار لمجموعة محددة (حسب الحالة أو النوع)", "إشعار عام لجميع المشتركين"], horizontal=True)
+    tab_send, tab_manage = st.tabs(["📤 إرسال إشعار جديد", "📋 إدارة ومتابعة الإشعارات المعلقة"])
 
-    with st.form("advanced_notification_form"):
-        msg_content = st.text_area("نص الإشعار المراد إرساله:")
-        target_device_id = None
-        target_group = None
+    with tab_send:
+        notif_target_type = st.radio("حدد نطاق الإرسال:", ["إشعار لجهاز/مستخدم فردي عبر رقم الهاتف أو ID", "إشعار لمجموعة محددة (حسب الحالة أو النوع)", "إشعار عام لجميع المشتركين"], horizontal=True)
 
-        if notif_target_type == "إشعار لجهاز/مستخدم فردي":
-            if not df_notif_users.empty:
-                dev_options = [f"هاتف: {p} | حالة: {s} | ID: {d[:10]}..." for p, s, d in zip(df_notif_users['phone'], df_notif_users['status'], df_notif_users['device_id'])]
-                selected_dev_idx = st.selectbox("اختر الجهاز المستهدف:", range(len(dev_options)), format_func=lambda x: dev_options[x])
-                target_device_id = df_notif_users['device_id'].tolist()[selected_dev_idx]
-            else:
-                st.warning("لا توجد أجهزة مسجلة.")
-                
-        elif notif_target_type == "إشعار لمجموعة محددة (حسب الحالة أو النوع)":
-            target_group = st.selectbox("اختر المجموعة المستهدفة:", [
-                "Active (المشتركين النشطين فقط)", 
-                "Expired (منتهيو الصلاحية فقط)", 
-                "VIP (اشتراكات VIP فقط)", 
-                "TRIAL (اشتراكات التجربة فقط)"
-            ])
+        with st.form("advanced_notification_form"):
+            msg_content = st.text_area("نص الإشعار المراد إرساله للمستخدمين:")
+            target_device_id = None
+            target_group = None
 
-        if st.form_submit_button("إرسال الإشعار الآن 🚀"):
-            if not msg_content.strip():
-                st.error("يرجى كتابة نص الإشعار أولاً!")
-            else:
-                success_flag = False
-                if notif_target_type == "إشعار لجهاز/مستخدم فردي" and target_device_id:
-                    success_flag = query("UPDATE myapp.users_status SET notice_message = %s WHERE device_id = %s", (msg_content, target_device_id))
-                elif notif_target_type == "إشعار لمجموعة محددة (حسب الحالة أو النوع)":
-                    if "Active" in target_group:
-                        success_flag = query("UPDATE myapp.users_status SET notice_message = %s WHERE status = 'Active'", (msg_content,))
-                    elif "Expired" in target_group:
-                        success_flag = query("UPDATE myapp.users_status SET notice_message = %s WHERE status = 'Expired'", (msg_content,))
-                    elif "VIP" in target_group:
-                        success_flag = query("UPDATE myapp.users_status SET notice_message = %s WHERE subscription_type = 'VIP'", (msg_content,))
-                    elif "TRIAL" in target_group:
-                        success_flag = query("UPDATE myapp.users_status SET notice_message = %s WHERE subscription_type = 'TRIAL'", (msg_content,))
-                elif notif_target_type == "إشعار عام لجميع المشتركين":
-                    success_flag = query("UPDATE myapp.users_status SET notice_message = %s", (msg_content,))
-
-                if success_flag:
-                    st.success("✅ تم إرسال الإشعار بنجاح!")
+            if notif_target_type == "إشعار لجهاز/مستخدم فردي عبر رقم الهاتف أو ID":
+                if not df_notif_users.empty:
+                    dev_options = [f"هاتف: {p} | حالة: {s} | ID: {d[:10]}..." for p, s, d in zip(df_notif_users['phone'], df_notif_users['status'], df_notif_users['device_id'])]
+                    selected_dev_idx = st.selectbox("اختر الجهاز المستهدف:", range(len(dev_options)), format_func=lambda x: dev_options[x])
+                    target_device_id = df_notif_users['device_id'].tolist()[selected_dev_idx]
                 else:
-                    st.error("فشل إرسال الإشعار.")
+                    st.warning("لا توجد أجهزة مسجلة.")
+                    
+            elif notif_target_type == "إشعار لمجموعة محددة (حسب الحالة أو النوع)":
+                target_group = st.selectbox("اختر المجموعة المستهدفة:", [
+                    "Active (المشتركين النشطين فقط)", 
+                    "Expired (منتهيو الصلاحية فقط)", 
+                    "VIP (اشتراكات VIP فقط)", 
+                    "TRIAL (اشتراكات التجربة فقط)"
+                ])
+
+            if st.form_submit_button("إرسال الإشعار الفوري 🚀"):
+                if not msg_content.strip():
+                    st.error("يرجى كتابة نص الإشعار أولاً!")
+                else:
+                    success_flag = False
+                    if notif_target_type == "إشعار لجهاز/مستخدم فردي عبر رقم الهاتف أو ID" and target_device_id:
+                        success_flag = query("UPDATE myapp.users_status SET notice_message = %s WHERE device_id = %s", (msg_content, target_device_id))
+                    elif notif_target_type == "إشعار لمجموعة محددة (حسب الحالة أو النوع)":
+                        if "Active" in target_group:
+                            success_flag = query("UPDATE myapp.users_status SET notice_message = %s WHERE status = 'Active'", (msg_content,))
+                        elif "Expired" in target_group:
+                            success_flag = query("UPDATE myapp.users_status SET notice_message = %s WHERE status = 'Expired'", (msg_content,))
+                        elif "VIP" in target_group:
+                            success_flag = query("UPDATE myapp.users_status SET notice_message = %s WHERE subscription_type = 'VIP'", (msg_content,))
+                        elif "TRIAL" in target_group:
+                            success_flag = query("UPDATE myapp.users_status SET notice_message = %s WHERE subscription_type = 'TRIAL'", (msg_content,))
+                    elif notif_target_type == "إشعار عام لجميع المشتركين":
+                        success_flag = query("UPDATE myapp.users_status SET notice_message = %s", (msg_content,))
+
+                    if success_flag:
+                        st.cache_data.clear()
+                        st.success("✅ تم إرسال الإشعار بنجاح إلى الجهة المستهدفة!")
+                    else:
+                        st.error("فشل إرسال الإشعار.")
+
+    with tab_manage:
+        st.subheader("📋 متابعة الإشعارات المعلقة لمستجيبي الأجهزة")
+        if not df_notif_users.empty:
+            pending_notifs = df_notif_users[df_notif_users['notice_message'].notnull() & (df_notif_users['notice_message'] != '')]
+            if not pending_notifs.empty:
+                st.dataframe(pending_notifs[['device_id', 'phone', 'notice_message']], use_container_width=True)
+                if st.button("🗑️ مسح وإلغاء كافة الإشعارات المعلقة لمجمل الأجهزة"):
+                    if query("UPDATE myapp.users_status SET notice_message = NULL"):
+                        st.cache_data.clear()
+                        st.success("تم مسح جميع الإشعارات المعلقة بنجاح.")
+                        st.rerun()
+            else:
+                st.info("لا توجد إشعارات معلقة حالياً بانتظار استلام الأجهزة لها.")
 
 elif page == "🚀 إدارة التحديثات الإجبارية":
     st.title("🚀 إدارة التحديثات الإجبارية")
