@@ -63,7 +63,7 @@ def run_query(query, params=()):
         st.error(f"حدث خطأ في قاعدة البيانات: {e}")
         return False
 
-# --- 2. إعداد الجداول والتأكد التام من هيكلتها وأعمدتها ---
+# --- 2. إعداد الجداول وكافة العلاقات (بما فيها الأكواد والمستخدمين والأجهزة) ---
 def setup_tables():
     try:
         cur = conn.cursor()
@@ -71,7 +71,7 @@ def setup_tables():
         # التأكد من وجود سكيما myapp
         cur.execute("CREATE SCHEMA IF NOT EXISTS myapp;")
         
-        # جدول الصلاحيات
+        # جدول الصلاحيات للوحة التحكم
         cur.execute("""
             CREATE TABLE IF NOT EXISTS myapp.app_permissions (
                 id SERIAL PRIMARY KEY,
@@ -84,7 +84,7 @@ def setup_tables():
         """)
         cur.execute("ALTER TABLE myapp.app_permissions ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE;")
 
-        # جدول إعدادات التطبيق وضمان إنشاء الأعمدة
+        # جدول إعدادات التطبيق والتحديثات
         cur.execute("""
             CREATE TABLE IF NOT EXISTS myapp.app_config (
                 id SERIAL PRIMARY KEY,
@@ -94,18 +94,42 @@ def setup_tables():
                 force_update_enabled BOOLEAN DEFAULT FALSE
             );
         """)
-        
         cur.execute("ALTER TABLE myapp.app_config ADD COLUMN IF NOT EXISTS latest_version VARCHAR(20) DEFAULT '7.1.0';")
         cur.execute("ALTER TABLE myapp.app_config ADD COLUMN IF NOT EXISTS update_url TEXT DEFAULT '';")
         cur.execute("ALTER TABLE myapp.app_config ADD COLUMN IF NOT EXISTS update_message TEXT DEFAULT 'يرجى تحديث التطبيق للاستمرار';")
         cur.execute("ALTER TABLE myapp.app_config ADD COLUMN IF NOT EXISTS force_update_enabled BOOLEAN DEFAULT FALSE;")
-        
-        # التأكد من وجود أعمدة المستخدمين (بما فيها إصدار التطبيق وحالة التحديث الإجباري الفردي)
-        try:
-            cur.execute("ALTER TABLE myapp.users_status ADD COLUMN IF NOT EXISTS app_version VARCHAR(20) DEFAULT 'غير معروف';")
-            cur.execute("ALTER TABLE myapp.users_status ADD COLUMN IF NOT EXISTS force_update_single BOOLEAN DEFAULT FALSE;")
-        except Exception:
-            pass
+
+        # جدول الأكواد (Subscriptions & Codes) والربط بالأجهزة التي قامت بتفعيلها
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS myapp.subscriptions (
+                id SERIAL PRIMARY KEY,
+                code VARCHAR(100) UNIQUE NOT NULL,
+                sub_type VARCHAR(50) DEFAULT 'VIP',
+                duration_days INT DEFAULT 30,
+                is_used BOOLEAN DEFAULT FALSE,
+                used_by_device VARCHAR(255) DEFAULT NULL,
+                used_at TIMESTAMP DEFAULT NULL
+            );
+        """)
+
+        # جدول حالات المستخدمين والأجهزة المفعلة
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS myapp.users_status (
+                device_id VARCHAR(255) PRIMARY KEY,
+                phone VARCHAR(50) DEFAULT '',
+                status VARCHAR(50) DEFAULT 'Active',
+                bot_status VARCHAR(50) DEFAULT 'Offline',
+                accepted_clicks INT DEFAULT 0,
+                subscription_type VARCHAR(50) DEFAULT 'VIP',
+                app_version VARCHAR(20) DEFAULT 'غير معروف',
+                force_update_single BOOLEAN DEFAULT FALSE,
+                expiry_date TIMESTAMP DEFAULT NULL,
+                notice_message TEXT DEFAULT '',
+                last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+        cur.execute("ALTER TABLE myapp.users_status ADD COLUMN IF NOT EXISTS app_version VARCHAR(20) DEFAULT 'غير معروف';")
+        cur.execute("ALTER TABLE myapp.users_status ADD COLUMN IF NOT EXISTS force_update_single BOOLEAN DEFAULT FALSE;")
 
         conn.commit()
         
@@ -255,7 +279,6 @@ if choice == "👥 إدارة ومراقبة المستخدمين":
                         st.rerun()
 
     st.markdown("---")
-    # جلب البيانات متضمنة إصدار التطبيق وحالة التحديث الفردي
     try:
         df_users = pd.read_sql("SELECT device_id, phone, status, bot_status, accepted_clicks, subscription_type, app_version, force_update_single, expiry_date, notice_message, last_active FROM myapp.users_status ORDER BY last_active DESC", conn)
     except Exception:
@@ -393,9 +416,9 @@ elif choice == "🚀 إدارة التحديثات الإجبارية":
     else:
         st.info("لم يتم تعيين رابط تحميل مباشر للنسخة بعد.")
 
-# 3. توليد وإدارة الأكواد
+# 3. توليد وإدارة الأكواد (مع جداول الأكواد والأجهزة التي قامت بتفعيلها)
 elif choice == "🎫 توليد وإدارة الأكواد (الادمن)":
-    st.title("🎫 لوحة توليد وإدارة الأكواد الشاملة")
+    st.title("🎫 لوحة توليد وإدارة الأكواد والأجهزة المفعلة")
     df_codes = pd.read_sql("SELECT * FROM myapp.subscriptions ORDER BY id DESC", conn)
     
     col1, col2 = st.columns(2)
@@ -410,24 +433,33 @@ elif choice == "🎫 توليد وإدارة الأكواد (الادمن)":
                 st.success("تم التوليد بنجاح")
                 st.rerun()
     with col2:
-        st.metric("أكواد غير مستعملة", len(df_codes[df_codes['is_used'] == False]))
-        st.metric("أكواد مستعملة", len(df_codes[df_codes['is_used'] == True]))
+        st.metric("أكواد غير مستعملة", len(df_codes[df_codes['is_used'] == False]) if not df_codes.empty else 0)
+        st.metric("أكواد مستعملة ومفعلة", len(df_codes[df_codes['is_used'] == True]) if not df_codes.empty else 0)
         
     st.markdown("---")
-    t1, t2 = st.tabs(["الأكواد الجديدة", "الأكواد المستعملة"])
+    t1, t2 = st.tabs(["الأكواد الجديدة المتاحة", "الأكواد المستخدمة والأجهزة المفعلة"])
     with t1:
-        st.dataframe(df_codes[df_codes['is_used'] == False][['id', 'code', 'sub_type', 'duration_days']], use_container_width=True)
+        if not df_codes.empty:
+            st.dataframe(df_codes[df_codes['is_used'] == False][['id', 'code', 'sub_type', 'duration_days']], use_container_width=True)
+        else:
+            st.info("لا توجد أكواد متاحة حالياً.")
     with t2:
-        st.dataframe(df_codes[df_codes['is_used'] == True][['code', 'used_by_device', 'used_at', 'sub_type']], use_container_width=True)
+        if not df_codes.empty:
+            st.dataframe(df_codes[df_codes['is_used'] == True][['code', 'sub_type', 'used_by_device', 'used_at']], use_container_width=True)
+        else:
+            st.info("لا توجد أكواد مستعملة حتى الآن.")
 
 # 4. قسم الشركاء
 elif choice == "🤝 قسم الشركاء (الموزعين)":
     st.title("🤝 لوحة الشركاء والموزعين")
-    df_codes = pd.read_sql("SELECT * FROM myapp.subscriptions ORDER BY id DESC", conn)
+    df_codes = pd.read_sql("SELECT code, sub_type, duration_days, is_used FROM myapp.subscriptions ORDER BY id DESC", conn)
     c1, c2 = st.columns(2)
-    c1.metric("📦 الأكواد المتاحة", len(df_codes[df_codes['is_used'] == False]))
-    c2.metric("✅ الأكواد المفعلة", len(df_codes[df_codes['is_used'] == True]))
-    st.dataframe(df_codes[df_codes['is_used'] == False][['code', 'sub_type', 'duration_days']], use_container_width=True)
+    c1.metric("📦 الأكواد المتاحة", len(df_codes[df_codes['is_used'] == False]) if not df_codes.empty else 0)
+    c2.metric("✅ الأكواد المفعلة", len(df_codes[df_codes['is_used'] == True]) if not df_codes.empty else 0)
+    if not df_codes.empty:
+        st.dataframe(df_codes[df_codes['is_used'] == False][['code', 'sub_type', 'duration_days']], use_container_width=True)
+    else:
+        st.info("لا توجد أكواد متاحة للعرض.")
 
 # 5. تحليل البيانات
 elif choice == "📈 تحليل البيانات":
