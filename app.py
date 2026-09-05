@@ -24,9 +24,9 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- وظائف قاعدة البيانات مع معالجة آمنة لملف الشهادة ---
+# --- وظائف قاعدة البيانات مع معالجة مطلقة وآمنة لملف الشهادة ---
 def download_ca_cert():
-    cert_path = "ca-certificate.crt"
+    cert_path = os.path.abspath("ca-certificate.crt")
     if not os.path.exists(cert_path) or os.path.getsize(cert_path) == 0:
         try:
             url = "https://certs.ondigitalocean.com/ca-certificate.crt"
