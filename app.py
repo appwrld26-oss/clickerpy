@@ -13,26 +13,24 @@ st.markdown("""
     <style>
     header {visibility: hidden;}
     
-    /* خطوط النظام الآمنة والداعمة للغة العربية عبر مختلف البيئات */
+    /* خطوط النظام القياسية والمتجاوبة */
     * {
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans Arabic", "Cairo", "Tahoma", sans-serif !important;
-        direction: rtl;
-        text-align: right;
     }
     
-    /* تثبيت خلفية وألوان الصفحة بالكامل */
+    /* تثبيت خلفية التطبيق العامة للوضع الفاتح */
     .stApp {
         background-color: #f8fafc !important;
         color: #1e293b !important;
     }
     
-    /* الشريط الجانبي المتجاوب */
+    /* الشريط الجانبي */
     [data-testid="stSidebar"] { 
         background-color: #f1f5f9 !important; 
         padding: 10px;
     }
     
-    /* تصميم المربعات والبطاقات (Metrics) */
+    /* البطاقات والمقاييس */
     .stMetric { 
         background-color: #ffffff !important; 
         padding: 15px !important; 
@@ -43,14 +41,13 @@ st.markdown("""
         color: #0f172a !important;
     }
     
-    /* 🛠️ حل مشكلة ظهور الخانات والفراغات باللون الأسود */
+    /* منع ظهور الخانات والفراغات باللون الأسود وضبط الحقول */
     input, textarea, select {
         background-color: #ffffff !important;
         color: #0f172a !important;
         border: 1px solid #cbd5e1 !important;
     }
 
-    /* إصلاح خلفيات مربعات الاختيار والقوائم المنسدلة في Streamlit */
     [data-baseweb="input"] div, [data-baseweb="base-input"] div, [data-baseweb="select"] div {
         background-color: #ffffff !important;
         color: #0f172a !important;
@@ -60,18 +57,25 @@ st.markdown("""
         color: #0f172a !important;
     }
     
-    /* تنسيق الأزرار لتكون متجاوبة وواضحة */
+    /* 📊 تنسيق الجداول (DataFrames) لتكون منسقة وواضحة ونظيفة */
+    [data-testid="stDataFrame"] {
+        background-color: #ffffff !important;
+        border-radius: 10px;
+        padding: 5px;
+        border: 1px solid #e2e8f0;
+    }
+
+    /* تنسيق الأزرار */
     .stButton button {
         width: 100% !important;
         border-radius: 8px !important;
         font-weight: 600 !important;
     }
 
-    /* تنسيق الجداول والتبويبات بمرونة تامة */
+    /* التبويبات */
     .stTabs [data-baseweb="tab-list"] { 
         gap: 8px; 
         flex-wrap: wrap;
-        direction: rtl;
     }
     
     .stTabs [data-baseweb="tab"] { 
