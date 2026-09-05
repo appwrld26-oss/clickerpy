@@ -9,12 +9,6 @@ from datetime import datetime, timedelta
 # =====================================================================
 # إعدادات الصفحة والتنسيقات المتجاوبة لكافة المتصفحات والبيئات
 # =====================================================================
-st.set_page_config(
-    page_title="MyClicker Pro Ultra Command Center",
-    layout="wide",
-    page_icon="⚡"
-)
-
 st.markdown("""
     <style>
     header {visibility: hidden;}
@@ -26,7 +20,7 @@ st.markdown("""
         text-align: right;
     }
     
-    /* تثبيت خلفية وألوان الصفحة لتجنب مشاكل الشاشة السوداء في أي متصفح */
+    /* تثبيت خلفية وألوان الصفحة بالكامل */
     .stApp {
         background-color: #f8fafc !important;
         color: #1e293b !important;
@@ -38,7 +32,7 @@ st.markdown("""
         padding: 10px;
     }
     
-    /* تصميم المربعات والبطاقات (Metrics) لتتطابق تلقائياً مع حجم الشاشة */
+    /* تصميم المربعات والبطاقات (Metrics) */
     .stMetric { 
         background-color: #ffffff !important; 
         padding: 15px !important; 
@@ -46,6 +40,24 @@ st.markdown("""
         border: 1px solid #e2e8f0 !important; 
         box-shadow: 0 2px 4px rgba(0,0,0,0.02); 
         margin-bottom: 10px;
+        color: #0f172a !important;
+    }
+    
+    /* 🛠️ حل مشكلة ظهور الخانات والفراغات باللون الأسود */
+    input, textarea, select {
+        background-color: #ffffff !important;
+        color: #0f172a !important;
+        border: 1px solid #cbd5e1 !important;
+    }
+
+    /* إصلاح خلفيات مربعات الاختيار والقوائم المنسدلة في Streamlit */
+    [data-baseweb="input"] div, [data-baseweb="base-input"] div, [data-baseweb="select"] div {
+        background-color: #ffffff !important;
+        color: #0f172a !important;
+    }
+
+    div[data-baseweb="select"] span {
+        color: #0f172a !important;
     }
     
     /* تنسيق الأزرار لتكون متجاوبة وواضحة */
@@ -53,12 +65,6 @@ st.markdown("""
         width: 100% !important;
         border-radius: 8px !important;
         font-weight: 600 !important;
-    }
-    
-    /* تنسيق حقول الإدخال والـ Selectbox */
-    input, select, textarea {
-        border-radius: 8px !important;
-        text-align: right !important;
     }
 
     /* تنسيق الجداول والتبويبات بمرونة تامة */
@@ -77,7 +83,6 @@ st.markdown("""
     }
     </style>
 """, unsafe_allow_html=True)
-
 # =====================================================================
 # الاتصال بقاعدة البيانات مع التخزين المؤقت وتحسين الأداء
 # =====================================================================
