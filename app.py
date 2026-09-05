@@ -9,30 +9,34 @@ from datetime import datetime, timedelta
 # =====================================================================
 # إعدادات الصفحة
 # =====================================================================
-st.set_page_config(
-    page_title="MyClicker Pro Ultra Command Center",
-    layout="wide",
-    page_icon="⚡"
-)
-
-# تعديل التنسيقات لفرض الألوان الفاتحة وتجنب مشكلة الشاشة السوداء في بعض المتصفحات
 st.markdown("""
     <style>
+    /* استيراد خط عربي قياسي ومتوافق مع كافة المتصفحات */
+    @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&display=swap');
+
+    /* فرض الخط الموحد على كافة عناصر الصفحة لمنع اختلاف المظهر بين الأجهزة */
+    * {
+        font-family: 'Cairo', sans-serif !important;
+    }
+
     header {visibility: hidden;}
-    body { direction: rtl; text-align: right; }
     
-    /* فرض الألوان الفاتحة وتجنب الشاشة السوداء */
+    /* تثبيت اتجاه الصفحة وخلفيتها لتجنب مشاكل الشاشة السوداء والوضع الداكن للمتصفحات */
     .stApp {
-        background-color: #f8fafc;
-        color: #1e293b;
+        background-color: #f8fafc !important;
+        color: #1e293b !important;
+        direction: rtl;
+        text-align: right;
     }
     
+    /* تنسيق الشريط الجانبي ليتطابق مع كافة المتصفحات */
     [data-testid="stSidebar"] { 
         text-align: right; 
         direction: rtl; 
         background-color: #f1f5f9 !important; 
     }
     
+    /* بطاقات الإحصائيات المتجاوبة */
     .stMetric { 
         background-color: #ffffff !important; 
         padding: 18px; 
@@ -42,13 +46,24 @@ st.markdown("""
         color: #0f172a !important;
     }
     
-    .stTabs [data-baseweb="tab-list"] { gap: 12px; }
+    /* تنسيق التبويبات */
+    .stTabs [data-baseweb="tab-list"] { 
+        gap: 12px; 
+        direction: rtl;
+    }
+    
     .stTabs [data-baseweb="tab"] { 
         background-color: #f1f5f9 !important; 
         border-radius: 10px 10px 0 0; 
         padding: 12px 24px; 
         font-weight: bold; 
         color: #334155 !important;
+    }
+
+    /* تحسين توافق الجداول مع الشاشات المختلفة */
+    [data-testid="stDataFrame"] {
+        direction: rtl;
+        text-align: right;
     }
     </style>
 """, unsafe_allow_html=True)
