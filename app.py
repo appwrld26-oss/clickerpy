@@ -18,7 +18,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# اتصال قاعدة البيانات
+# اتصال قاعدة البيانات (مطابق لهيكل جداول سيرفر Node.js)
 @st.cache_resource
 def get_conn():
     try:
@@ -50,14 +50,21 @@ def query(sql, params=()):
         st.error(f"خطأ قاعدة بيانات: {e}")
         return False
 
-# تهيئة الجداول الأساسية
+# تهيئة جدول الإعدادات والصلاحيات الافتراضية إذا لم تكن موجودة
 try:
     cur = conn.cursor()
     cur.execute("CREATE SCHEMA IF NOT EXISTS myapp;")
-    cur.execute("CREATE TABLE IF NOT EXISTS myapp.app_config (id SERIAL PRIMARY KEY, latest_version VARCHAR(20) DEFAULT '7.1.0', update_url TEXT DEFAULT '', update_message TEXT DEFAULT 'يرجى التحديث', force_update_enabled BOOLEAN DEFAULT FALSE);")
-    cur.execute("CREATE TABLE IF NOT EXISTS myapp.users_status (device_id VARCHAR(255) PRIMARY KEY, phone VARCHAR(50) DEFAULT '', status VARCHAR(50) DEFAULT 'Active', bot_status VARCHAR(50) DEFAULT 'Offline', accepted_clicks INT DEFAULT 0, subscription_type VARCHAR(50) DEFAULT 'VIP', app_version VARCHAR(20) DEFAULT '7.1.0', force_update_single BOOLEAN DEFAULT FALSE, expiry_date TIMESTAMP DEFAULT NULL, notice_message TEXT DEFAULT '', last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP);")
-    cur.execute("CREATE TABLE IF NOT EXISTS myapp.app_permissions (id SERIAL PRIMARY KEY, username VARCHAR(50) UNIQUE NOT NULL, password VARCHAR(100) NOT NULL, role_name VARCHAR(50), allowed_sections TEXT[], is_active BOOLEAN DEFAULT TRUE);")
-    cur.execute("CREATE TABLE IF NOT EXISTS myapp.subscriptions (id SERIAL PRIMARY KEY, code VARCHAR(100) UNIQUE NOT NULL, sub_type VARCHAR(50) DEFAULT 'VIP', duration_days INT DEFAULT 30, is_used BOOLEAN DEFAULT FALSE, used_by_device VARCHAR(255) DEFAULT NULL, used_at TIMESTAMP DEFAULT NULL);")
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS myapp.app_permissions (
+            id SERIAL PRIMARY KEY,
+            username VARCHAR(50) UNIQUE NOT NULL,
+            password VARCHAR(100) NOT NULL,
+            role_name VARCHAR(50),
+            allowed_sections TEXT[],
+            is_active BOOLEAN DEFAULT TRUE
+        );
+    """)
+    cur.execute("ALTER TABLE myapp.app_permissions ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE;")
     
     all_secs = [
         "👥 إدارة ومراقبة المستخدمين", 
@@ -75,10 +82,6 @@ try:
         cur.execute("INSERT INTO myapp.app_permissions (username, password, role_name, allowed_sections, is_active) VALUES ('admin', 'admin123', 'مدير النظام', %s, TRUE)", (all_secs,))
     else:
         cur.execute("UPDATE myapp.app_permissions SET allowed_sections = %s WHERE username = 'admin'", (all_secs,))
-    
-    cur.execute("SELECT COUNT(*) FROM myapp.app_config")
-    if cur.fetchone()[0] == 0:
-        cur.execute("INSERT INTO myapp.app_config (id, latest_version) VALUES (1, '7.1.0')")
     
     conn.commit()
     cur.close()
@@ -122,64 +125,77 @@ if st.sidebar.button("🚪 خروج"):
 # الأقسام الكاملة
 # =====================================================================
 
-# 1. إدارة ومراقبة المستخدمين
 if page == "👥 إدارة ومراقبة المستخدمين":
     st.title("👥 إدارة المستخدمين والأجهزة والتحكم الشامل")
-    df = pd.read_sql("SELECT device_id, phone, status, bot_status, app_version, force_update_single, notice_message, last_active FROM myapp.users_status ORDER BY last_active DESC", conn)
-    st.dataframe(df, use_container_width=True)
+    try:
+        df = pd.read_sql("SELECT device_id, phone, status, bot_status, app_version, accepted_clicks, last_active FROM myapp.users_status ORDER BY last_active DESC", conn)
+        st.dataframe(df, use_container_width=True)
+    except Exception as e:
+        st.info("لا توجد بيانات مستخدمين مسجلة حتى الآن.")
 
-# 2. إدارة التحديثات الإجبارية (بالنافذة المنبثقة وزر التحميل)
 elif page == "🚀 إدارة التحديثات الإجبارية":
-    st.title("🚀 إدارة التحديثات الإجبارية (النافذة المنبثقة وأزرار التحميل)")
+    st.title("🚀 إدارة التحديثات الإجبارية (النافذة المنبثقة وزر التحميل)")
+    st.info("💡 هذه الإعدادات متزامنة تماماً مع سيرفر Node.js وسيتم تطبيقها فوراً على التطبيق عند فحص الحالة.")
     
-    conf = pd.read_sql("SELECT * FROM myapp.app_config WHERE id = 1", conn).iloc[0]
+    try:
+        config_rows = pd.read_sql("SELECT * FROM myapp.app_config", conn)
+        conf = dict(zip(config_rows['key'], config_rows['value']))
+    except Exception:
+        conf = {'latest_version': '7.1.0', 'update_url': '', 'force_update': 'true'}
     
-    with st.form("upd_dialog_form"):
-        v = st.text_input("رقم الإصدار الأحدث:", value=conf['latest_version'])
-        url = st.text_input("رابط التحميل المباشر للـ APK (زر التحميل):", value=conf['update_url'])
-        msg = st.text_area("رسالة النافذة المنبثقة الإجبارية:", value=conf['update_message'])
-        forced = st.checkbox("تفعيل النافذة المنبثقة الإجبارية (منع تخطي التحديث)", value=conf['force_update_enabled'])
+    with st.form("upd_form_node"):
+        v = st.text_input("رقم الإصدار الأحدث (مثل 7.2.0):", value=conf.get('latest_version', '7.1.0'))
+        url = st.text_input("رابط التحميل المباشر للـ APK (زر التحميل):", value=conf.get('update_url', ''))
+        msg = st.text_area("رسالة النافذة المنبثقة الإجبارية:", value=conf.get('update_message', 'يرجى تحديث التطبيق للاستمرار!'))
+        forced = st.selectbox("حالة التحديث الإجباري:", ["true", "false"], index=0 if conf.get('force_update', 'true') == 'true' else 1)
         
-        if st.form_submit_button("نشر النافذة المنبثقة وزر التحميل لكافة الأجهزة 🚀"):
-            query("UPDATE myapp.app_config SET latest_version=%s, update_url=%s, update_message=%s, force_update_enabled=%s WHERE id = 1", (v, url, msg, forced))
-            dialog_command = f"DIALOG_UPDATE:version={v}|url={url}|msg={msg}"
-            query("UPDATE myapp.users_status SET notice_message = %s, force_update_single = TRUE", (dialog_command,))
-            st.success("✅ تم نشر النافذة المنبثقة وزر التحميل المباشر لكافة التطبيقات المحملة بنجاح!")
+        if st.form_submit_button("حفظ ونشر التحديث الإجباري لكافة الأجهزة 🚀"):
+            query("INSERT INTO myapp.app_config (key, value) VALUES ('latest_version', %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", (v,))
+            query("INSERT INTO myapp.app_config (key, value) VALUES ('update_url', %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", (url,))
+            query("INSERT INTO myapp.app_config (key, value) VALUES ('update_message', %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", (msg,))
+            query("INSERT INTO myapp.app_config (key, value) VALUES ('force_update', %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", (forced,))
+            
+            # إرسال إشعار فوري لكل الأجهزة عبر حقل notice_message لفتح النافذة المنبثقة فوراً
+            dialog_cmd = f"DIALOG_UPDATE:version={v}|url={url}|msg={msg}"
+            query("UPDATE myapp.users_status SET notice_message = %s", (dialog_cmd,))
+            
+            st.success("✅ تم تحديث ونشر إعدادات التحديث الإجباري بنجاح عبر السيرفر!")
             st.rerun()
             
     st.markdown("---")
     st.subheader("💡 معاينة شكل التنبيه والزر المنبثق للمستخدم:")
     if url:
         st.markdown(f"""
-        > **{msg}**
+        > **{conf.get('update_message', 'يرجى تحديث التطبيق!')}**
         > 
         > [![تحميل التحديث الآن](https://img.shields.io/badge/📥_تحميل_التحديث_الآن-أضغط_هنا-blue?style=for-the-badge)]({url})
         """)
     else:
         st.info("قم بإدخال رابط التحميل لمعاينة الزر هنا.")
 
-# 3. توليد وإدارة الأكواد
 elif page == "🎫 توليد وإدارة الأكواد":
     st.title("🎫 توليد وإدارة الأكواد والأجهزة المفعلة")
     with st.form("gen"):
-        tp = st.selectbox("نوع الكود:", ["VIP", "TRIAL"])
+        tp = st.selectbox("نوع الاشتراك:", ["VIP", "TRIAL"])
+        days = st.number_input("المدة بالأيام:", min_value=1, value=30)
         qty = st.number_input("الكمية:", min_value=1, value=10)
         if st.form_submit_button("توليد الأكواد 🚀"):
             for _ in range(qty):
-                code = f"{tp}-{''.join(random.choices(string.ascii_uppercase + string.digits, k=6))}"
-                query("INSERT INTO myapp.subscriptions (code, sub_type, duration_days, is_used) VALUES (%s, %s, 30, FALSE)", (code, tp))
-            st.success("تم توليد الأكواد بنجاح.")
+                code = tp[:3].upper() + ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
+                query("INSERT INTO myapp.subscriptions (code, sub_type, duration_days, is_used) VALUES (%s, %s, %s, FALSE) ON CONFLICT DO NOTHING", (code, tp, days))
+            st.success(f"تم توليد {qty} كود بنجاح.")
             st.rerun()
 
-# 4. قسم الشركاء والموزعين
 elif page == "🤝 قسم الشركاء (الموزعين)":
     st.title("🤝 لوحة الشركاء والموزعين الشاملة")
-    df_s = pd.read_sql("SELECT code, sub_type, is_used, used_by_device, used_at FROM myapp.subscriptions ORDER BY id DESC", conn)
-    t1, t2 = st.tabs(["📦 الأكواد المتاحة", "✅ الأكواد المستخدمة"])
-    t1.dataframe(df_s[df_s['is_used'] == False], use_container_width=True)
-    t2.dataframe(df_s[df_s['is_used'] == True], use_container_width=True)
+    try:
+        df_s = pd.read_sql("SELECT code, sub_type, duration_days, is_used, used_by_device, used_at FROM myapp.subscriptions ORDER BY id DESC", conn)
+        t1, t2 = st.tabs(["📦 الأكواد المتاحة", "✅ الأكواد المستخدمة"])
+        t1.dataframe(df_s[df_s['is_used'] == False], use_container_width=True)
+        t2.dataframe(df_s[df_s['is_used'] == True], use_container_width=True)
+    except Exception:
+        st.info("لا توجد أكواد مسجلة حالياً.")
 
-# 5. تحليل البيانات
 elif page == "📈 تحليل البيانات":
     st.title("📈 تحليل البيانات وأوقات الذروة")
     try:
@@ -193,19 +209,19 @@ elif page == "📈 تحليل البيانات":
     except Exception:
         st.info("البيانات غير متوفرة حالياً.")
 
-# 6. حالة السيرفر
 elif page == "🖥️ حالة السيرفر":
     st.title("🖥️ مراقبة السيرفر")
-    st.success("🟢 السيرفر متصل ويعمل بكفاءة على DigitalOcean.")
+    st.success("🟢 سيرفر Node.js متصل بقاعدة بيانات PostgreSQL ويعمل بكفاءة على DigitalOcean.")
     st.info("قاعدة البيانات: PostgreSQL | التشفير: SSL Active")
 
-# 7. إدارة الصلاحيات والتحكم
 elif page == "🔐 إدارة الصلاحيات والتحكم":
     st.title("🔐 إدارة حسابات لوحة التحكم وصلاحياتها")
-    df_p = pd.read_sql("SELECT username, role_name, is_active FROM myapp.app_permissions", conn)
-    st.dataframe(df_p, use_container_width=True)
+    try:
+        df_p = pd.read_sql("SELECT username, role_name, is_active FROM myapp.app_permissions", conn)
+        st.dataframe(df_p, use_container_width=True)
+    except Exception:
+        st.info("لا توجد صلاحيات مسجلة.")
 
-# 8. الدعم الفني والتواصل
 elif page == "🛠️ الدعم الفني والتواصل":
     st.title("🛠️ الدعم الفني")
     st.info("📱 واتساب الإدارة: مراسلة الدعم الفني")
