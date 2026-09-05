@@ -3,7 +3,6 @@ import pandas as pd
 import psycopg2
 import plotly.express as px
 import os
-import urllib.request
 import random
 import string
 from datetime import datetime, timedelta
@@ -24,26 +23,17 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- وظائف قاعدة البيانات مع معالجة مطلقة وآمنة لملف الشهادة ---
-def download_ca_cert():
-    cert_path = os.path.abspath("ca-certificate.crt")
-    if not os.path.exists(cert_path) or os.path.getsize(cert_path) == 0:
-        try:
-            url = "https://certs.ondigitalocean.com/ca-certificate.crt"
-            urllib.request.urlretrieve(url, cert_path)
-        except Exception:
-            with open(cert_path, "w") as f: 
-                f.write("")
-    return cert_path
-
+# --- اتصال آمن ومباشر بقاعدة البيانات دون الاعتماد على ملف شهادة خارجي ---
 @st.cache_resource
 def init_connection():
     try:
-        cert_file = download_ca_cert()
         return psycopg2.connect(
-            database="defaultdb", user="doadmin", password="1tHwqXCgn8BS6iTm942V3f7a",
-            host="myclicker-db-rd7ky.db1.ondigitalocean.com", port="5432",
-            sslmode="require", sslrootcert=cert_file
+            database="defaultdb", 
+            user="doadmin", 
+            password="1tHwqXCgn8BS6iTm942V3f7a",
+            host="myclicker-db-rd7ky.db1.ondigitalocean.com", 
+            port="5432",
+            sslmode="require"
         )
     except Exception as e:
         st.error(f"فشل الاتصال بقاعدة البيانات: {e}")
