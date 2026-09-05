@@ -95,7 +95,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # =====================================================================
-# الاتصال بقاعدة البيانات مع التخزين المؤقت وتحسين الأداء
+# الاتصال بقاعدة البيانات مع التخزين المؤقت وحماية الاستقرار
 # =====================================================================
 @st.cache_resource
 def get_conn():
@@ -120,81 +120,98 @@ if not conn:
 def query(sql, params=()):
     try:
         global conn
-        if conn.closed != 0:
+        if conn is None or conn.closed != 0:
             conn = get_conn()
+        if not conn:
+            return False
         cur = conn.cursor()
         cur.execute(sql, params)
         conn.commit()
         cur.close()
         return True
     except Exception as e:
-        conn.rollback()
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
         st.error(f"خطأ في تنفيذ قاعدة البيانات: {e}")
         return False
 
 @st.cache_data(ttl=10)
 def load_users_data():
     try:
-        return pd.read_sql("SELECT device_id, phone, status, subscription_type, expiry_date, bot_status, app_version, accepted_clicks, last_active, notice_message FROM myapp.users_status ORDER BY last_active DESC", conn)
+        if conn and conn.closed == 0:
+            return pd.read_sql("SELECT device_id, phone, status, subscription_type, expiry_date, bot_status, app_version, accepted_clicks, last_active, notice_message FROM myapp.users_status ORDER BY last_active DESC", conn)
     except Exception:
-        return pd.DataFrame()
+        pass
+    return pd.DataFrame()
 
 @st.cache_data(ttl=10)
 def load_subs_data():
     try:
-        return pd.read_sql("SELECT id, code, sub_type, duration_days, is_used, used_by_device, used_at FROM myapp.subscriptions ORDER BY id DESC", conn)
+        if conn and conn.closed == 0:
+            return pd.read_sql("SELECT id, code, sub_type, duration_days, is_used, used_by_device, used_at FROM myapp.subscriptions ORDER BY id DESC", conn)
     except Exception:
-        return pd.DataFrame()
+        pass
+    return pd.DataFrame()
 
 @st.cache_data(ttl=15)
 def load_config_data():
     try:
-        config_rows = pd.read_sql("SELECT key, value FROM myapp.app_config", conn)
-        return dict(zip(config_rows['key'], config_rows['value']))
+        if conn and conn.closed == 0:
+            config_rows = pd.read_sql("SELECT key, value FROM myapp.app_config", conn)
+            return dict(zip(config_rows['key'], config_rows['value']))
     except Exception:
-        return {'latest_version': '7.1.0', 'update_url': '', 'force_update': 'true', 'update_message': 'يرجى التحديث'}
+        pass
+    return {'latest_version': '7.1.0', 'update_url': '', 'force_update': 'true', 'update_message': 'يرجى التحديث'}
 
 # =====================================================================
-# تهيئة الجداول وتحديث الهيكل الذاتي
+# تهيئة الجداول وتحديث الهيكل الذاتي (بشكل آمن يحمى من انقطاع الاتصال)
 # =====================================================================
 try:
-    cur = conn.cursor()
-    cur.execute("CREATE SCHEMA IF NOT EXISTS myapp;")
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS myapp.app_permissions (
-            id SERIAL PRIMARY KEY,
-            username VARCHAR(50) UNIQUE NOT NULL,
-            password VARCHAR(100) NOT NULL,
-            role_name VARCHAR(50),
-            allowed_sections TEXT[],
-            is_active BOOLEAN DEFAULT TRUE
-        );
-    """)
-    cur.execute("ALTER TABLE myapp.app_permissions ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE;")
-    
-    all_secs = [
-        "📈 نظرة عامة وإحصائيات الإصدارات",
-        "👥 إدارة ومراقبة المستخدمين والتفعيل", 
-        "📢 مركز الإشعارات الشامل الكامل",
-        "🚀 إدارة التحديثات الإجبارية", 
-        "🎫 توليد وإدارة الأكواد", 
-        "🤝 قسم الشركاء (الموزعين)", 
-        "📈 تحليل البيانات", 
-        "🖥️ حالة السيرفر", 
-        "🔐 إدارة الصلاحيات والتحكم", 
-        "🛠️ الدعم الفني والتواصل"
-    ]
+    if conn and conn.closed == 0:
+        cur = conn.cursor()
+        cur.execute("CREATE SCHEMA IF NOT EXISTS myapp;")
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS myapp.app_permissions (
+                id SERIAL PRIMARY KEY,
+                username VARCHAR(50) UNIQUE NOT NULL,
+                password VARCHAR(100) NOT NULL,
+                role_name VARCHAR(50),
+                allowed_sections TEXT[],
+                is_active BOOLEAN DEFAULT TRUE
+            );
+        """)
+        cur.execute("ALTER TABLE myapp.app_permissions ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE;")
+        
+        all_secs = [
+            "📈 نظرة عامة وإحصائيات الإصدارات",
+            "👥 إدارة ومراقبة المستخدمين والتفعيل", 
+            "📢 مركز الإشعارات الشامل الكامل",
+            "🚀 إدارة التحديثات الإجبارية", 
+            "🎫 توليد وإدارة الأكواد", 
+            "🤝 قسم الشركاء (الموزعين)", 
+            "📈 تحليل البيانات", 
+            "🖥️ حالة السيرفر", 
+            "🔐 إدارة الصلاحيات والتحكم", 
+            "🛠️ الدعم الفني والتواصل"
+        ]
 
-    cur.execute("SELECT COUNT(*) FROM myapp.app_permissions WHERE username = 'admin'")
-    if cur.fetchone()[0] == 0:
-        cur.execute("INSERT INTO myapp.app_permissions (username, password, role_name, allowed_sections, is_active) VALUES ('admin', 'admin123', 'مدير النظام', %s, TRUE)", (all_secs,))
-    else:
-        cur.execute("UPDATE myapp.app_permissions SET allowed_sections = %s WHERE username = 'admin'", (all_secs,))
-    
-    conn.commit()
-    cur.close()
-except Exception:
-    conn.rollback()
+        cur.execute("SELECT COUNT(*) FROM myapp.app_permissions WHERE username = 'admin'")
+        if cur.fetchone()[0] == 0:
+            cur.execute("INSERT INTO myapp.app_permissions (username, password, role_name, allowed_sections, is_active) VALUES ('admin', 'admin123', 'مدير النظام', %s, TRUE)", (all_secs,))
+        else:
+            cur.execute("UPDATE myapp.app_permissions SET allowed_sections = %s WHERE username = 'admin'", (all_secs,))
+        
+        conn.commit()
+        cur.close()
+except Exception as e:
+    if conn:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
 
 # =====================================================================
 # نظام المصادقة
@@ -208,17 +225,23 @@ if not st.session_state.logged:
         u = st.text_input("اسم المستخدم:")
         p = st.text_input("كلمة المرور:", type="password")
         if st.form_submit_button("تسجيل الدخول 🚀"):
-            cur = conn.cursor()
-            cur.execute("SELECT password, allowed_sections, is_active FROM myapp.app_permissions WHERE username = %s", (u,))
-            res = cur.fetchone()
-            cur.close()
-            if res and res[2] and res[0] == p:
-                st.session_state.logged = True
-                st.session_state.user = u
-                st.session_state.sections = res[1]
-                st.rerun()
-            else:
-                st.error("بيانات الدخول غير صحيحة أو الحساب معطل.")
+            try:
+                if conn and conn.closed == 0:
+                    cur = conn.cursor()
+                    cur.execute("SELECT password, allowed_sections, is_active FROM myapp.app_permissions WHERE username = %s", (u,))
+                    res = cur.fetchone()
+                    cur.close()
+                    if res and res[2] and res[0] == p:
+                        st.session_state.logged = True
+                        st.session_state.user = u
+                        st.session_state.sections = res[1]
+                        st.rerun()
+                    else:
+                        st.error("بيانات الدخول غير صحيحة أو الحساب معطل.")
+                else:
+                    st.error("فشل الاتصال بقاعدة البيانات.")
+            except Exception as login_err:
+                st.error(f"خطأ أثناء تسجيل الدخول: {login_err}")
     st.stop()
 
 # =====================================================================
@@ -438,13 +461,16 @@ elif page == "🤝 قسم الشركاء (الموزعين)":
 elif page == "📈 تحليل البيانات":
     st.title("📈 تحليل البيانات وأوقات الذروة للطلبات")
     try:
-        df_orders = pd.read_sql("SELECT order_time, price FROM myapp.accepted_orders LIMIT 2000", conn)
-        if not df_orders.empty:
-            df_orders['hour'] = pd.to_datetime(df_orders['order_time']).dt.hour
-            fig = px.bar(df_orders.groupby('hour').size().reset_index(name='count'), x='hour', y='count', title="أوقات الذروة للطلبات المقبولة حسب الساعة")
-            st.plotly_chart(fig, use_container_width=True)
+        if conn and conn.closed == 0:
+            df_orders = pd.read_sql("SELECT order_time, price FROM myapp.accepted_orders LIMIT 2000", conn)
+            if not df_orders.empty:
+                df_orders['hour'] = pd.to_datetime(df_orders['order_time']).dt.hour
+                fig = px.bar(df_orders.groupby('hour').size().reset_index(name='count'), x='hour', y='count', title="أوقات الذروة للطلبات المقبولة حسب الساعة")
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("لا توجد سجلات طلبات كافية لعرض الرسومات البيانية.")
         else:
-            st.info("لا توجد سجلات طلبات كافية لعرض الرسومات البيانية.")
+            st.info("لا يوجد اتصال نشط بقاعدة البيانات.")
     except Exception:
         st.info("بيانات الطلبات غير متوفرة في قاعدة البيانات حالياً.")
 
@@ -456,8 +482,11 @@ elif page == "🖥️ حالة السيرفر":
 elif page == "🔐 إدارة الصلاحيات والتحكم":
     st.title("🔐 إدارة حسابات لوحة التحكم والصلاحيات")
     try:
-        df_p = pd.read_sql("SELECT username, role_name, is_active FROM myapp.app_permissions", conn)
-        st.dataframe(df_p, use_container_width=True)
+        if conn and conn.closed == 0:
+            df_p = pd.read_sql("SELECT username, role_name, is_active FROM myapp.app_permissions", conn)
+            st.dataframe(df_p, use_container_width=True)
+        else:
+            st.info("لا يوجد اتصال نشط بقاعدة البيانات.")
     except Exception:
         st.info("لا توجد حسابات صلاحيات مسجلة.")
 
