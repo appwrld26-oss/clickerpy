@@ -100,9 +100,10 @@ def setup_tables():
         cur.execute("ALTER TABLE myapp.app_config ADD COLUMN IF NOT EXISTS update_message TEXT DEFAULT 'يرجى تحديث التطبيق للاستمرار';")
         cur.execute("ALTER TABLE myapp.app_config ADD COLUMN IF NOT EXISTS force_update_enabled BOOLEAN DEFAULT FALSE;")
         
-        # التأكد من وجود عمود إصدار التطبيق (app_version) في جدول مستخدمي التطبيق إن وجد
+        # التأكد من وجود أعمدة المستخدمين (بما فيها إصدار التطبيق وحالة التحديث الإجباري الفردي)
         try:
             cur.execute("ALTER TABLE myapp.users_status ADD COLUMN IF NOT EXISTS app_version VARCHAR(20) DEFAULT 'غير معروف';")
+            cur.execute("ALTER TABLE myapp.users_status ADD COLUMN IF NOT EXISTS force_update_single BOOLEAN DEFAULT FALSE;")
         except Exception:
             pass
 
@@ -247,20 +248,20 @@ if choice == "👥 إدارة ومراقبة المستخدمين":
                     gen_device_id = f"PHONE-DEV-{''.join(random.choices(string.ascii_uppercase + string.digits, k=10))}"
                     calc_expiry = datetime.now() + timedelta(days=sub_days)
                     if run_query("""
-                        INSERT INTO myapp.users_status (device_id, phone, status, subscription_type, expiry_date, accepted_clicks, app_version)
-                        VALUES (%s, %s, 'Active', %s, %s, 0, '7.1.0')
+                        INSERT INTO myapp.users_status (device_id, phone, status, subscription_type, expiry_date, accepted_clicks, app_version, force_update_single)
+                        VALUES (%s, %s, 'Active', %s, %s, 0, '7.1.0', FALSE)
                     """, (gen_device_id, phone_input.strip(), sub_type, calc_expiry)):
                         st.success(f"✅ تمت إضافة وتفعيل رقم الهاتف ({phone_input}) بنجاح!")
                         st.rerun()
 
     st.markdown("---")
-    # جلب البيانات متضمنة عمود إصدار التطبيق (app_version)
+    # جلب البيانات متضمنة إصدار التطبيق وحالة التحديث الفردي
     try:
-        df_users = pd.read_sql("SELECT device_id, phone, status, bot_status, accepted_clicks, subscription_type, app_version, expiry_date, notice_message, last_active FROM myapp.users_status ORDER BY last_active DESC", conn)
+        df_users = pd.read_sql("SELECT device_id, phone, status, bot_status, accepted_clicks, subscription_type, app_version, force_update_single, expiry_date, notice_message, last_active FROM myapp.users_status ORDER BY last_active DESC", conn)
     except Exception:
-        # في حال لم يكن العمود موجوداً بعد في الاستعلام يتم جلبه بدونه مع تجنب الخطأ
         df_users = pd.read_sql("SELECT device_id, phone, status, bot_status, accepted_clicks, subscription_type, expiry_date, notice_message, last_active FROM myapp.users_status ORDER BY last_active DESC", conn)
         df_users['app_version'] = 'غير معروف'
+        df_users['force_update_single'] = False
 
     total_users = len(df_users)
     online_bots = len(df_users[df_users['bot_status'] == 'Online']) if not df_users.empty else 0
@@ -284,23 +285,23 @@ if choice == "👥 إدارة ومراقبة المستخدمين":
             st.success("تم إرسال الإشعار للكل بنجاح!")
     
     st.markdown("---")
-    st.markdown("### 📋 سجل المستخدمين (يتضمن إصدار التطبيق لكل مستخدم)")
+    st.markdown("### 📋 سجل المستخدمين (مع إصدار التطبيق وحالة التحديث الفردي)")
     
     if not df_users.empty:
         st.data_editor(df_users, use_container_width=True, hide_index=True, key="users_data_editor")
         
         st.markdown("---")
-        st.markdown("### 🛠️ لوحة التعديل والحفظ الثابت للمشترك وإرسال الإشعارات")
+        st.markdown("### 🛠️ لوحة التعديل والحفظ الثابت للمشترك، الإشعارات، وتفعيل التحديث الإجباري الفردي")
         
         user_list = df_users['device_id'].tolist()
         phones_list = df_users['phone'].astype(str).tolist()
-        options = [f"هاتف: {p} | إصدار: {v} | جهاز: {d[:6]}..." for p, v, d in zip(phones_list, df_users['app_version'].tolist(), user_list)]
+        options = [f"هاتف: {p} | إصدار: {v} | تحديث فردي: {'مفعل ⚡' if f else 'معطل'} | جهاز: {d[:6]}..." for p, v, f, d in zip(phones_list, df_users['app_version'].tolist(), df_users['force_update_single'].tolist(), user_list)]
         
         if "selected_user_idx" not in st.session_state:
             st.session_state.selected_user_idx = 0
 
         selected_index = st.selectbox(
-            "اختر المشترك للتعديل أو الإرسال الفردي:", 
+            "اختر المشترك للتعديل أو التحكم الفردي:", 
             range(len(options)), 
             format_func=lambda x: options[x],
             index=st.session_state.selected_user_idx,
@@ -316,6 +317,7 @@ if choice == "👥 إدارة ومراقبة المستخدمين":
             with col_u1:
                 edit_phone = st.text_input("تعديل رقم الهاتف:", value=str(curr_user_row['phone']) if curr_user_row['phone'] else "")
                 edit_status = st.selectbox("حالة الاشتراك:", ["Active", "Expired", "Banned"], index=["Active", "Expired", "Banned"].index(curr_user_row['status']) if curr_user_row['status'] in ["Active", "Expired", "Banned"] else 0)
+                edit_force_single = st.checkbox("⚡ تفعيل التحديث الإجباري الفردي لهذا المستخدم حصراً", value=bool(curr_user_row['force_update_single']) if 'force_update_single' in curr_user_row else False)
             with col_u2:
                 edit_sub_type = st.text_input("نوع الاشتراك:", value=str(curr_user_row['subscription_type']) if curr_user_row['subscription_type'] else "VIP")
                 edit_notice = st.text_input("نص إشعار فردي للمشترك:", value="")
@@ -331,8 +333,8 @@ if choice == "👥 إدارة ومراقبة المستخدمين":
                 submit_delete_user = st.form_submit_button("🗑️ حذف المشترك")
             
             if submit_save_user:
-                if run_query("UPDATE myapp.users_status SET phone = %s, status = %s, subscription_type = %s WHERE device_id = %s", (edit_phone, edit_status, edit_sub_type, selected_device)):
-                    st.success("✅ تم حفظ التعديلات بنجاح!")
+                if run_query("UPDATE myapp.users_status SET phone = %s, status = %s, subscription_type = %s, force_update_single = %s WHERE device_id = %s", (edit_phone, edit_status, edit_sub_type, edit_force_single, selected_device)):
+                    st.success("✅ تم حفظ التعديلات وتحديث حالة التحديث الإجباري الفردي بنجاح!")
                     st.rerun()
             
             if submit_single_msg:
@@ -362,7 +364,7 @@ if choice == "👥 إدارة ومراقبة المستخدمين":
 # 2. إدارة التحديثات الإجبارية
 elif choice == "🚀 إدارة التحديثات الإجبارية":
     st.title("🚀 إدارة التحديثات الإجبارية ورابط التحميل المباشر")
-    st.warning("تحذير: تفعيل الإيقاف الإجباري سيجبر المستخدمين على تحميل النسخة الجديدة لتجاوز شاشة التحديث.")
+    st.warning("تحذير: تفعيل الإيقاف الإجباري العام سيجبر جميع المستخدمين على التحديث، بينما يمكنك تفعيل التحديث الفردي لكل مستخدم من قسم إدارة المستخدمين.")
     
     config_df = pd.read_sql("SELECT latest_version, update_url, update_message, force_update_enabled FROM myapp.app_config LIMIT 1", conn)
     if not config_df.empty:
@@ -374,14 +376,14 @@ elif choice == "🚀 إدارة التحديثات الإجبارية":
         new_ver = st.text_input("رقم الإصدار الأحدث (مثل 7.2.0):", value=config['latest_version'])
         new_url = st.text_input("رابط تحميل الـ APK المباشر:", value=config['update_url'])
         new_msg = st.text_area("رسالة التنبيه للمستخدم عند التحديث:", value=config['update_message'])
-        is_forced = st.checkbox("تفعيل الإيقاف الإجباري للنسخ القديمة", value=config['force_update_enabled'])
+        is_forced = st.checkbox("تفعيل الإيقاف الإجباري العام للنسخ القديمة", value=config['force_update_enabled'])
         
         if st.form_submit_button("حفظ وتحديث بيانات الإصدار 💾"):
             if run_query("""
                 UPDATE myapp.app_config 
                 SET latest_version=%s, update_url=%s, update_message=%s, force_update_enabled=%s
             """, (new_ver, new_url, new_msg, is_forced)):
-                st.success("تم حفظ إعدادات التحديث الإجباري ورابط التحميل بنجاح!")
+                st.success("تم حفظ إعدادات التحديث الإجباري العام ورابط التحميل بنجاح!")
                 st.rerun()
                 
     st.markdown("---")
