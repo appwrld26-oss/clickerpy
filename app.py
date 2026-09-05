@@ -306,19 +306,19 @@ if page == "📈 نظرة عامة وإحصائيات الإصدارات":
             st.plotly_chart(fig_bot, use_container_width=True)
 
 elif page == "👥 إدارة ومراقبة المستخدمين والتفعيل":
-    st.title("👥 إدارة المستخدمين، الأجهزة، والتحكم ببيانات التفعيل")
+    st.title("👥 إدارة المستخدمين، الأجهزة، والتحكم ببيانات التفعيل والحذف")
     df_users = load_users_data()
 
     if not df_users.empty:
         st.dataframe(df_users, use_container_width=True)
         
         st.markdown("---")
-        st.subheader("🛠️ لوحة التحكم وتعديل بيانات التفعيل للمستخدم المختار")
+        st.subheader("🛠️ لوحة التحكم وتعديل أو حذف بيانات المستخدم المختار")
         
         device_list = df_users['device_id'].tolist()
         options = [f"هاتف: {p} | حالة: {s} | اشتراك: {t} | جهاز: {d[:8]}..." for p, s, t, d in zip(df_users['phone'], df_users['status'], df_users['subscription_type'], device_list)]
         
-        selected_idx = st.selectbox("اختر الجهاز أو المشترك للتعديل:", range(len(options)), format_func=lambda x: options[x])
+        selected_idx = st.selectbox("اختر الجهاز أو المشترك للتعديل أو الحذف:", range(len(options)), format_func=lambda x: options[x])
         target_device = device_list[selected_idx]
         target_row = df_users[df_users['device_id'] == target_device].iloc[0]
         
@@ -333,7 +333,11 @@ elif page == "👥 إدارة ومراقبة المستخدمين والتفعي
                 new_expiry_date = st.date_input("تاريخ انتهاء الاشتراك:", value=current_expiry.date())
                 new_expiry_time = st.time_input("وقت الانتهاء:", value=current_expiry.time())
             
-            if st.form_submit_button("💾 حفظ وتحديث بيانات التفعيل"):
+            col_btn1, col_btn2 = st.columns(2)
+            save_clicked = col_btn1.form_submit_button("💾 حفظ وتحديث بيانات التفعيل")
+            delete_clicked = col_btn2.form_submit_button("🗑️ حذف هذا المستخدم نهائياً")
+            
+            if save_clicked:
                 full_expiry = datetime.combine(new_expiry_date, new_expiry_time)
                 res = query("""
                     UPDATE myapp.users_status 
@@ -344,6 +348,13 @@ elif page == "👥 إدارة ومراقبة المستخدمين والتفعي
                 if res:
                     st.cache_data.clear()
                     st.success("✅ تم تحديث بيانات تفعيل المستخدم بنجاح!")
+                    st.rerun()
+                    
+            if delete_clicked:
+                res_del = query("DELETE FROM myapp.users_status WHERE device_id = %s", (target_device,))
+                if res_del:
+                    st.cache_data.clear()
+                    st.success("🗑️ تم حذف المستخدم والجهاز من النظام بنجاح!")
                     st.rerun()
     else:
         st.info("لا توجد بيانات مسجلة للمستخدمين حالياً.")
