@@ -11,63 +11,66 @@ from datetime import datetime, timedelta
 # =====================================================================
 st.markdown("""
     <style>
-    /* استيراد خط عربي قياسي ومتوافق مع كافة المتصفحات */
-    @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&display=swap');
-
-    /* فرض الخط الموحد على كافة عناصر الصفحة لمنع اختلاف المظهر بين الأجهزة */
-    * {
-        font-family: 'Cairo', sans-serif !important;
-    }
-
+    /* إخفاء شريط Streamlit العلوي */
     header {visibility: hidden;}
     
-    /* تثبيت اتجاه الصفحة وخلفيتها لتجنب مشاكل الشاشة السوداء والوضع الداكن للمتصفحات */
-    .stApp {
-        background-color: #f8fafc !important;
-        color: #1e293b !important;
+    /* فرض خطوط النظام الآمنة والداعمة للغة العربية عبر مختلف البيئات (Windows, iOS, Android, Mac) */
+    * {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans Arabic", "Cairo", "Tahoma", sans-serif !important;
         direction: rtl;
         text-align: right;
     }
     
-    /* تنسيق الشريط الجانبي ليتطابق مع كافة المتصفحات */
-    [data-testid="stSidebar"] { 
-        text-align: right; 
-        direction: rtl; 
-        background-color: #f1f5f9 !important; 
+    /* تثبيت خلفية وألوان الصفحة لتجنب مشاكل الشاشة السوداء في أي متصفح */
+    .stApp {
+        background-color: #f8fafc !important;
+        color: #1e293b !important;
     }
     
-    /* بطاقات الإحصائيات المتجاوبة */
+    /* الشريط الجانبي المتجاوب */
+    [data-testid="stSidebar"] { 
+        background-color: #f1f5f9 !important; 
+        padding: 10px;
+    }
+    
+    /* تصميم المربعات والبطاقات (Metrics) لتتطابق تلقائياً مع حجم الشاشة */
     .stMetric { 
         background-color: #ffffff !important; 
-        padding: 18px; 
-        border-radius: 14px; 
-        border: 1px solid #e2e8f0; 
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); 
-        color: #0f172a !important;
+        padding: 15px !important; 
+        border-radius: 12px !important; 
+        border: 1px solid #e2e8f0 !important; 
+        box-shadow: 0 2px 4px rgba(0,0,0,0.02); 
+        margin-bottom: 10px;
     }
     
-    /* تنسيق التبويبات */
+    /* تنسيق الأزرار لتكون متجاوبة وواضحة */
+    .stButton button {
+        width: 100% !important;
+        border-radius: 8px !important;
+        font-weight: 600 !important;
+    }
+    
+    /* تنسيق حقول الإدخال والـ Selectbox لتناسب مختلف البيئات */
+    input, select, textarea {
+        border-radius: 8px !important;
+        text-align: right !important;
+    }
+
+    /* تنسيق الجداول والتبويبات بمرونة تامة */
     .stTabs [data-baseweb="tab-list"] { 
-        gap: 12px; 
-        direction: rtl;
+        gap: 8px; 
+        flex-wrap: wrap;
     }
     
     .stTabs [data-baseweb="tab"] { 
         background-color: #f1f5f9 !important; 
-        border-radius: 10px 10px 0 0; 
-        padding: 12px 24px; 
+        border-radius: 8px 8px 0 0 !important; 
+        padding: 10px 18px !important; 
         font-weight: bold; 
         color: #334155 !important;
     }
-
-    /* تحسين توافق الجداول مع الشاشات المختلفة */
-    [data-testid="stDataFrame"] {
-        direction: rtl;
-        text-align: right;
-    }
     </style>
 """, unsafe_allow_html=True)
-
 # =====================================================================
 # الاتصال بقاعدة البيانات (مع تخزين الاتصال مؤقتاً لسرعة الاستجابة)
 # =====================================================================
