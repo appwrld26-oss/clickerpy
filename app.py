@@ -9,19 +9,21 @@ from datetime import datetime, timedelta
 # =====================================================================
 # 1. إعدادات التصميم والسمات (Theme)
 # =====================================================================
-st.set_page_config(page_title="MyClicker Pro Ultra Command Center", layout="wide", page_icon="⚡")
-
-st.markdown("""
-    <style>
-    header {visibility: hidden;}
-    * { font-family: 'Segoe UI', Roboto, 'Cairo', sans-serif !important; }
-    .stApp { background-color: #f8fafc !important; }
-    .stMetric { background-color: #ffffff !important; padding: 20px !important; border-radius: 15px !important; border: 1px solid #e2e8f0 !important; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
-    .stButton button { border-radius: 10px !important; font-weight: 700 !important; transition: 0.3s; }
-    .stButton button:hover { background-color: #1e3a8a !important; color: white !important; }
-    .sidebar .sidebar-content { background-color: #0f172a; color: white; }
-    </style>
-""", unsafe_allow_html=True)
+        st.markdown("---")
+        cc1, cc2 = st.columns(2)
+        with cc1:
+            st.subheader("📊 توزيع إصدارات التطبيق")
+            # إصلاح الرسم الدائري
+            version_df = df['app_version'].value_counts().reset_index()
+            version_df.columns = ['Version', 'Count']
+            st.plotly_chart(px.pie(version_df, names='Version', values='Count', hole=0.4), use_container_width=True)
+            
+        with cc2:
+            st.subheader("🤖 حالة نشاط البوتات")
+            # إصلاح الرسم البياني للأعمدة (حل المشكلة المذكورة)
+            bot_df = df['bot_status'].value_counts().reset_index()
+            bot_df.columns = ['Status', 'Count'] # تسمية الأعمدة يدوياً لضمان الاستقرار
+            st.plotly_chart(px.bar(bot_df, x='Status', y='Count', color='Status'), use_container_width=True)
 
 # =====================================================================
 # 2. إدارة قاعدة البيانات
