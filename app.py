@@ -240,7 +240,11 @@ if not st.session_state.logged:
                     if res and res[2] and res[0] == p:
                         st.session_state.logged = True
                         st.session_state.user = u
-                        st.session_state.sections = res[1] if res[1] else []
+                        # تحديث تلقائي للأقسام للأدمن لضمان ظهور الميزات الجديدة دائماً
+                        if u == 'admin':
+                            st.session_state.sections = all_secs
+                        else:
+                            st.session_state.sections = res[1] if res[1] else []
                         st.rerun()
                     else:
                         st.error("بيانات الدخول غير صحيحة أو الحساب معطل.")
