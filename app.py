@@ -486,13 +486,15 @@ elif page == "🔄 لوحة LIVE UPDATE":
         li = st.text_area("مؤشرات الطلب (live_indicators):", value=conf.get('live_indicators', ''), help="افصل بين المؤشرات بفاصلة (،)")
         
         st.markdown("---")
-        st.subheader("🌐 توجيه السيرفر الديناميكي")
+        st.subheader("🌐 توجيه السيرفر والسرعة")
         n_url = st.text_input("رابط الـ API القادم (next_api_url):", value=conf.get('next_api_url', ''), help="سيتم استخدامه لتوجيه التطبيق إلى دومين جديد تلقائياً")
+        c_delay = st.number_input("تأخير النقرات بالمللي ثانية (click_delay):", min_value=1, max_value=5000, value=int(conf.get('click_delay', 500)), help="كلما قل الرقم زادت سرعة النقر (500ms = نصف ثانية)")
         
         if st.form_submit_button("🚀 حفظ ونشر التحديثات الحية"):
             query("INSERT INTO myapp.app_config (key, value) VALUES ('live_keywords', %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", (lk,))
             query("INSERT INTO myapp.app_config (key, value) VALUES ('live_indicators', %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", (li,))
             query("INSERT INTO myapp.app_config (key, value) VALUES ('next_api_url', %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", (n_url,))
+            query("INSERT INTO myapp.app_config (key, value) VALUES ('click_delay', %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", (str(c_delay),))
             
             st.cache_data.clear()
             st.success("✅ تم حفظ ونشر التحديثات الحية بنجاح!")
