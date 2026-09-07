@@ -151,6 +151,15 @@ def load_subs_data():
         pass
     return pd.DataFrame()
 
+@st.cache_data(ttl=10)
+def load_security_logs():
+    try:
+        if conn and conn.closed == 0:
+            return pd.read_sql("SELECT id, device_id, phone, action, reason, created_at FROM myapp.security_logs ORDER BY created_at DESC LIMIT 500", conn)
+    except Exception:
+        pass
+    return pd.DataFrame()
+
 @st.cache_data(ttl=15)
 def load_config_data():
     try:
@@ -184,6 +193,7 @@ try:
             "📈 نظرة عامة وإحصائيات الإصدارات",
             "👥 إدارة ومراقبة المستخدمين والتفعيل", 
             "📢 مركز الإشعارات الشامل الكامل",
+            "🛡️ سجلات الأمان والرقابة",
             "🔄 لوحة LIVE UPDATE",
             "🚀 إدارة التحديثات الإجبارية", 
             "🎫 توليد وإدارة الأكواد", 
@@ -300,64 +310,82 @@ if page == "📈 نظرة عامة وإحصائيات الإصدارات":
             st.plotly_chart(fig_bot, use_container_width=True)
 
 elif page == "👥 إدارة ومراقبة المستخدمين والتفعيل":
-    st.title("👥 إدارة المستخدمين، الأجهزة، والتحكم ببيانات التفعيل والحذف")
+    st.title("👥 إدارة المستخدمين والأجهزة")
     df_users = load_users_data()
+    
     if not df_users.empty:
-        st.dataframe(df_users, use_container_width=True)
+        # نظام البحث والفلترة المتقدم
+        st.subheader("🔍 البحث عن مستخدم")
+        search_query = st.text_input("أدخل رقم الهاتف أو معرف الجهاز للبحث:", placeholder="مثال: 079xxxxxxx")
         
-        st.markdown("---")
-        st.subheader("🛠️ لوحة التحكم وتعديل أو حذف بيانات المستخدم المختار")
+        filtered_df = df_users
+        if search_query:
+            filtered_df = df_users[
+                df_users['phone'].str.contains(search_query, na=False) | 
+                df_users['device_id'].str.contains(search_query, na=False)
+            ]
         
-        device_list = df_users['device_id'].tolist()
-        options = [f"هاتف: {p} | حالة: {s} | اشتراك: {t} | جهاز: {d[:8]}..." for p, s, t, d in zip(df_users['phone'], df_users['status'], df_users['subscription_type'], device_list)]
-        
-        selected_idx = st.selectbox("اختر الجهاز أو المشترك للتعديل أو الحذف:", range(len(options)), format_func=lambda x: options[x])
-        target_device = device_list[selected_idx]
-        target_row = df_users[df_users['device_id'] == target_device].iloc[0]
-        
-        with st.form("edit_user_activation_form"):
-            col_e1, col_e2 = st.columns(2)
-            with col_e1:
-                new_phone = st.text_input("تعديل رقم الهاتف:", value=str(target_row['phone']) if target_row['phone'] else "")
-                new_status = st.selectbox("حالة الاشتراك:", ["Active", "Expired", "Blocked"], index=["Active", "Expired", "Blocked"].index(target_row['status']) if target_row['status'] in ["Active", "Expired", "Blocked"] else 0)
-                new_sub_type = st.selectbox("نوع الاشتراك:", ["VIP", "TRIAL", "Monthly"], index=0)
-            with col_e2:
-                current_expiry = pd.to_datetime(target_row['expiry_date']) if target_row['expiry_date'] else datetime.now()
-                new_expiry_date = st.date_input("تاريخ انتهاء الاشتراك:", value=current_expiry.date())
-                new_expiry_time = st.time_input("وقت الانتهاء:", value=current_expiry.time())
+        if filtered_df.empty:
+            st.warning("❌ لم يتم العثور على نتائج تطابق بحثك.")
+        else:
+            st.dataframe(filtered_df, use_container_width=True)
             
-            col_btn1, col_btn2, col_btn3 = st.columns(3)
-            save_clicked = col_btn1.form_submit_button("💾 حفظ وتحديث بيانات التفعيل")
-            reset_device_clicked = col_btn2.form_submit_button("🔄 إعادة تعيين الجهاز (Reset Device)")
-            delete_clicked = col_btn3.form_submit_button("🗑️ حذف هذا المستخدم نهائياً")
+            st.markdown("---")
+            st.subheader("🛠️ لوحة التحكم في الجهاز المختار")
             
-            if save_clicked:
-                full_expiry = datetime.combine(new_expiry_date, new_expiry_time)
-                res = query("""
-                    UPDATE myapp.users_status 
-                    SET phone = %s, status = %s, subscription_type = %s, expiry_date = %s 
-                    WHERE device_id = %s
-                """, (new_phone, new_status, new_sub_type, full_expiry, target_device))
-                
-                if res:
-                    st.cache_data.clear()
-                    st.success("✅ تم تحديث بيانات تفعيل المستخدم بنجاح!")
-                    st.rerun()
+            device_list = filtered_df['device_id'].tolist()
+            options = [f"📱 {p} | 🆔 {d[:12]}... | 🏷️ {s}" for p, d, s in zip(filtered_df['phone'], device_list, filtered_df['status'])]
+            
+            selected_idx = st.selectbox("اختر الحساب المطلوب معالجته:", range(len(options)), format_func=lambda x: options[x])
+            target_device = device_list[selected_idx]
+            target_row = filtered_df[filtered_df['device_id'] == target_device].iloc[0]
+            
+            # عرض بطاقة معلومات سريعة
+            c1, c2, c3 = st.columns(3)
+            with c1: st.info(f"📞 الهاتف: {target_row['phone']}")
+            with c2: st.info(f"📅 الانتهاء: {target_row['expiry_date']}")
+            with c3: 
+                color = "green" if target_row['status'] == "Active" else "red"
+                st.markdown(f"**الحالة:** :{color}[{target_row['status']}]")
 
-            if reset_device_clicked:
-                if query("DELETE FROM myapp.users_status WHERE device_id = %s", (target_device,)):
-                    st.cache_data.clear()
-                    st.success(f"✅ تم إعادة تعيين الجهاز. يمكن للمستخدم الآن تسجيل الدخول من جهاز جديد باستخدام الرقم {target_row['phone']}")
-                    st.rerun()
-                    
-            if delete_clicked:
-                res_del = query("DELETE FROM myapp.users_status WHERE device_id = %s", (target_device,))
-                if res_del:
-                    st.cache_data.clear()
-                    st.success("🗑️ تم حذف المستخدم والجهاز من النظام بنجاح!")
-                    st.rerun()
+            with st.form("edit_user_activation_form"):
+                col_e1, col_e2 = st.columns(2)
+                with col_e1:
+                    new_phone = st.text_input("تعديل رقم الهاتف:", value=str(target_row['phone']) if target_row['phone'] else "")
+                    new_status = st.selectbox("تغيير الحالة:", ["Active", "Expired", "Blocked"], index=["Active", "Expired", "Blocked"].index(target_row['status']) if target_row['status'] in ["Active", "Expired", "Blocked"] else 0)
+                    new_sub_type = st.selectbox("فئة الاشتراك:", ["VIP", "TRIAL", "Monthly"], index=0)
+                with col_e2:
+                    current_expiry = pd.to_datetime(target_row['expiry_date']) if target_row['expiry_date'] else datetime.now()
+                    new_expiry_date = st.date_input("تاريخ الانتهاء الجديد:", value=current_expiry.date())
+                    new_expiry_time = st.time_input("وقت الانتهاء:", value=current_expiry.time())
+                
+                st.markdown("---")
+                col_btn1, col_btn2, col_btn3 = st.columns(3)
+                save_clicked = col_btn1.form_submit_button("💾 حفظ التعديلات")
+                reset_device_clicked = col_btn2.form_submit_button("🔄 فك ارتباط الجهاز (Reset)")
+                delete_clicked = col_btn3.form_submit_button("🗑️ حذف نهائي")
+                
+                if save_clicked:
+                    full_expiry = datetime.combine(new_expiry_date, new_expiry_time)
+                    if query("UPDATE myapp.users_status SET phone = %s, status = %s, subscription_type = %s, expiry_date = %s WHERE device_id = %s", (new_phone, new_status, new_sub_type, full_expiry, target_device)):
+                        st.cache_data.clear()
+                        st.success("✅ تم تحديث البيانات بنجاح!")
+                        st.rerun()
+
+                if reset_device_clicked:
+                    # ميزة Reset: تسمح للمستخدم بالدخول من جهاز جديد بنفس الرقم
+                    if query("DELETE FROM myapp.users_status WHERE device_id = %s", (target_device,)):
+                        st.cache_data.clear()
+                        st.success(f"✅ تم فك الارتباط بنجاح. يمكن للكابتن صاحب الرقم ({target_row['phone']}) تسجيل الدخول الآن من أي جهاز آخر.")
+                        st.rerun()
+                        
+                if delete_clicked:
+                    if query("DELETE FROM myapp.users_status WHERE device_id = %s", (target_device,)):
+                        st.cache_data.clear()
+                        st.error("🗑️ تم حذف الحساب بالكامل من النظام.")
+                        st.rerun()
     else:
-        st.info("لا توجد بيانات مسجلة للمستخدمين حالياً.")
+        st.info("لا توجد بيانات مستخدمين مسجلة في الوقت الحالي.")
 
 elif page == "📢 مركز الإشعارات الشامل الكامل":
     st.title("📢 مركز الإشعارات الشامل المتقدم")
@@ -427,6 +455,21 @@ elif page == "📢 مركز الإشعارات الشامل الكامل":
                         st.rerun()
             else:
                 st.info("لا توجد إشعارات معلقة حالياً بانتظار استلام الأجهزة لها.")
+
+elif page == "🛡️ سجلات الأمان والرقابة":
+    st.title("🛡️ سجلات الأمان ومراقبة محاولات التلاعب")
+    st.info("من هنا يمكنك متابعة كافة محاولات التفعيل الفاشلة أو محاولات استخدام الأكواد على أكثر من جهاز.")
+    
+    logs_df = load_security_logs()
+    if not logs_df.empty:
+        st.dataframe(logs_df, use_container_width=True)
+        if st.button("🗑️ مسح كافة سجلات الأمان"):
+            if query("DELETE FROM myapp.security_logs"):
+                st.cache_data.clear()
+                st.success("تم مسح السجلات بنجاح.")
+                st.rerun()
+    else:
+        st.success("✅ لا توجد سجلات أمان مشبوهة حالياً.")
 
 elif page == "🔄 لوحة LIVE UPDATE":
     st.title("🔄 لوحة التحكم الفوري - LIVE UPDATE")
@@ -524,6 +567,7 @@ elif page == "🔐 إدارة الصلاحيات والتحكم":
         "📈 نظرة عامة وإحصائيات الإصدارات",
         "👥 إدارة ومراقبة المستخدمين والتفعيل", 
         "📢 مركز الإشعارات الشامل الكامل",
+        "🛡️ سجلات الأمان والرقابة",
         "🔄 لوحة LIVE UPDATE",
         "🚀 إدارة التحديثات الإجبارية", 
         "🎫 توليد وإدارة الأكواد", 
