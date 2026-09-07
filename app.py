@@ -137,7 +137,7 @@ def query(sql, params=()):
 def load_users_data():
     try:
         if conn and conn.closed == 0:
-            return pd.read_sql("SELECT device_id, phone, status, subscription_type, expiry_date, bot_status, app_version, accepted_clicks, last_active, notice_message FROM myapp.users_status ORDER BY last_active DESC", conn)
+            return pd.read_sql("SELECT device_id, phone, status, sub_tier, is_frozen, expiry_date, bot_status, app_version, accepted_clicks, last_active, notice_message, last_ip FROM myapp.users_status ORDER BY last_active DESC", conn)
     except Exception:
         pass
     return pd.DataFrame()
@@ -146,7 +146,7 @@ def load_users_data():
 def load_subs_data():
     try:
         if conn and conn.closed == 0:
-            return pd.read_sql("SELECT id, code, sub_type, duration_days, is_used, used_by_device, used_at FROM myapp.subscriptions ORDER BY id DESC", conn)
+            return pd.read_sql("SELECT id, code, sub_tier, duration_days, is_used, used_by_device, used_at FROM myapp.subscriptions ORDER BY id DESC", conn)
     except Exception:
         pass
     return pd.DataFrame()
@@ -357,7 +357,8 @@ elif page == "👥 إدارة ومراقبة المستخدمين والتفعي
                 with col_e1:
                     new_phone = st.text_input("تعديل رقم الهاتف:", value=str(target_row['phone']) if target_row['phone'] else "")
                     new_status = st.selectbox("تغيير الحالة:", ["Active", "Expired", "Blocked"], index=["Active", "Expired", "Blocked"].index(target_row['status']) if target_row['status'] in ["Active", "Expired", "Blocked"] else 0)
-                    new_sub_type = st.selectbox("فئة الاشتراك:", ["VIP", "TRIAL", "Monthly"], index=0)
+                    new_sub_tier = st.selectbox("فئة الاشتراك:", ["TRIAL", "STANDARD", "VIP"], index=["TRIAL", "STANDARD", "VIP"].index(target_row['sub_tier']) if target_row['sub_tier'] in ["TRIAL", "STANDARD", "VIP"] else 1)
+                    is_frozen = st.checkbox("تجميد الحساب (Freeze)", value=target_row['is_frozen'])
                 with col_e2:
                     current_expiry = pd.to_datetime(target_row['expiry_date']) if target_row['expiry_date'] else datetime.now()
                     new_expiry_date = st.date_input("تاريخ الانتهاء الجديد:", value=current_expiry.date())
@@ -371,7 +372,7 @@ elif page == "👥 إدارة ومراقبة المستخدمين والتفعي
                 
                 if save_clicked:
                     full_expiry = datetime.combine(new_expiry_date, new_expiry_time)
-                    if query("UPDATE myapp.users_status SET phone = %s, status = %s, subscription_type = %s, expiry_date = %s WHERE device_id = %s", (new_phone, new_status, new_sub_type, full_expiry, target_device)):
+                    if query("UPDATE myapp.users_status SET phone = %s, status = %s, sub_tier = %s, is_frozen = %s, expiry_date = %s WHERE device_id = %s", (new_phone, new_status, new_sub_tier, is_frozen, full_expiry, target_device)):
                         st.cache_data.clear()
                         st.success("✅ تم تحديث البيانات بنجاح!")
                         st.rerun()
