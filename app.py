@@ -177,6 +177,20 @@ try:
     if conn and conn.closed == 0:
         cur = conn.cursor()
         cur.execute("CREATE SCHEMA IF NOT EXISTS myapp;")
+        
+        # ميزة الإصلاح التلقائي لقاعدة البيانات (Fix missing columns)
+        db_patches = [
+            "ALTER TABLE myapp.users_status ADD COLUMN IF NOT EXISTS sub_tier VARCHAR(20) DEFAULT 'STANDARD'",
+            "ALTER TABLE myapp.users_status ADD COLUMN IF NOT EXISTS is_frozen BOOLEAN DEFAULT FALSE",
+            "ALTER TABLE myapp.users_status ADD COLUMN IF NOT EXISTS last_ip VARCHAR(100)",
+            "ALTER TABLE myapp.subscriptions ADD COLUMN IF NOT EXISTS sub_tier VARCHAR(50) DEFAULT 'STANDARD'"
+        ]
+        for patch in db_patches:
+            try:
+                cur.execute(patch)
+            except:
+                conn.rollback()
+        
         cur.execute("""
             CREATE TABLE IF NOT EXISTS myapp.app_permissions (
                 id SERIAL PRIMARY KEY,
