@@ -138,8 +138,8 @@ def load_users_data():
     try:
         if conn and conn.closed == 0:
             return pd.read_sql("SELECT device_id, phone, status, sub_tier, is_frozen, expiry_date, bot_status, app_version, accepted_clicks, last_active, notice_message, last_ip FROM myapp.users_status ORDER BY last_active DESC", conn)
-    except Exception:
-        pass
+    except Exception as e:
+        st.error(f"⚠️ خطأ في جلب بيانات المستخدمين: {e}")
     return pd.DataFrame()
 
 @st.cache_data(ttl=10)
@@ -147,8 +147,8 @@ def load_subs_data():
     try:
         if conn and conn.closed == 0:
             return pd.read_sql("SELECT id, code, sub_tier, duration_days, is_used, used_by_device, used_at FROM myapp.subscriptions ORDER BY id DESC", conn)
-    except Exception:
-        pass
+    except Exception as e:
+        st.error(f"⚠️ خطأ في جلب بيانات الأكواد: {e}")
     return pd.DataFrame()
 
 @st.cache_data(ttl=10)
