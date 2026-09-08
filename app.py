@@ -1,9 +1,11 @@
 import streamlit as st
 import pandas as pd
 import psycopg2
+from psycopg2 import pool
 import plotly.express as px
 import random
 import string
+import hashlib
 from datetime import datetime, timedelta
 
 # =====================================================================
@@ -14,24 +16,17 @@ st.set_page_config(page_title="MyClicker Pro Ultra Command Center", layout="wide
 st.markdown("""
 <style>
 header {visibility: hidden;}
-/* خطوط النظام القياسية والمتجاوبة */
 * {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans Arabic", "Cairo", "Tahoma", sans-serif !important;
 }
-
-/* تثبيت خلفية التطبيق العامة للوضع الفاتح ومنع الشاشة السوداء */
 .stApp {
     background-color: #f8fafc !important;
     color: #1e293b !important;
 }
-
-/* الشريط الجانبي */
 [data-testid="stSidebar"] { 
     background-color: #f1f5f9 !important; 
     padding: 10px;
 }
-
-/* بطاقات المقاييس والإحصائيات */
 .stMetric { 
     background-color: #ffffff !important; 
     padding: 15px !important; 
@@ -41,44 +36,33 @@ header {visibility: hidden;}
     margin-bottom: 10px;
     color: #0f172a !important;
 }
-
-/* تثبيت ألوان وخلفيات حقول الإدخال والـ Selectbox لمنع ظهورها باللون الأسود */
 input, textarea, select {
     background-color: #ffffff !important;
     color: #0f172a !important;
     border: 1px solid #cbd5e1 !important;
 }
-
 [data-baseweb="input"] div, [data-baseweb="base-input"] div, [data-baseweb="select"] div {
     background-color: #ffffff !important;
     color: #0f172a !important;
 }
-
 div[data-baseweb="select"] span {
     color: #0f172a !important;
 }
-
-/* تنسيق الجداول لتكون بخلفية بيضاء ونظيفة */
 [data-testid="stDataFrame"] {
     background-color: #ffffff !important;
     border-radius: 10px;
     padding: 5px;
     border: 1px solid #e2e8f0;
 }
-
-/* الأزرار */
 .stButton button {
     width: 100% !important;
     border-radius: 8px !important;
     font-weight: 600 !important;
 }
-
-/* التبويبات */
 .stTabs [data-baseweb="tab-list"] { 
     gap: 8px; 
     flex-wrap: wrap;
 }
-
 .stTabs [data-baseweb="tab"] { 
     background-color: #f1f5f9 !important; 
     border-radius: 8px 8px 0 0 !important; 
@@ -89,149 +73,126 @@ div[data-baseweb="select"] span {
 </style>
 """, unsafe_allow_html=True)
 
+# دالة مساعدة لتشفير كلمات المرور
+def hash_password(password: str) -> str:
+    return hashlib.sha256(password.encode('utf-8')).hexdigest()
+
 # =====================================================================
-# الاتصال بقاعدة البيانات مع التخزين المؤقت وحماية الاستقرار
+# الاتصال بقاعدة البيانات باستخدام Connection Pool وآلية أمان Secrets
 # =====================================================================
 @st.cache_resource
-def get_conn():
+def init_connection_pool():
     try:
-        return psycopg2.connect(
-            database="defaultdb",
-            user="doadmin",
-            password="1tHwqXCgn8BS6iTm942V3f7a",
-            host="myclicker-db-rd7ky.db1.ondigitalocean.com",
-            port="5432",
-            sslmode="require",
-            connect_timeout=5
-        )
-    except Exception:
+        db_config = st.secrets.get("postgres", {
+            "dbname": "defaultdb",
+            "user": "doadmin",
+            "password": "1tHwqXCgn8BS6iTm942V3f7a",
+            "host": "myclicker-db-rd7ky.db1.ondigitalocean.com",
+            "port": "5432",
+            "sslmode": "require"
+        })
+        return pool.SimpleConnectionPool(1, 10, **db_config)
+    except Exception as e:
+        st.error(f"❌ خطأ في تهيئة الاتصال بقاعدة البيانات: {e}")
         return None
 
-conn = get_conn()
-if not conn:
-    st.error("❌ فشل الاتصال بقاعدة البيانات على DigitalOcean. يرجى التحقق من بيانات الاتصال.")
-    st.stop()
+db_pool = init_connection_pool()
 
-def query(sql, params=()):
+def execute_query(sql, params=(), fetch=False):
+    if not db_pool:
+        return None if fetch else False
+    conn = None
     try:
-        global conn
-        if conn is None or conn.closed != 0:
-            conn = get_conn()
-            if not conn:
-                return False
-        cur = conn.cursor()
-        cur.execute(sql, params)
-        conn.commit()
-        cur.close()
-        return True
+        conn = db_pool.getconn()
+        with conn.cursor() as cur:
+            cur.execute(sql, params)
+            if fetch:
+                colnames = [desc[0] for desc in cur.description] if cur.description else []
+                data = cur.fetchall()
+                conn.commit()
+                return pd.DataFrame(data, columns=colnames) if colnames else pd.DataFrame()
+            conn.commit()
+            return True
     except Exception as e:
         if conn:
-            try:
-                conn.rollback()
-            except Exception:
-                pass
+            conn.rollback()
         st.error(f"خطأ في تنفيذ قاعدة البيانات: {e}")
-        return False
+        return None if fetch else False
+    finally:
+        if conn:
+            db_pool.putconn(conn)
 
 @st.cache_data(ttl=10)
 def load_users_data():
-    try:
-        if conn and conn.closed == 0:
-            return pd.read_sql("SELECT device_id, phone, status, sub_tier, is_frozen, expiry_date, bot_status, app_version, accepted_clicks, last_active, notice_message, last_ip FROM myapp.users_status ORDER BY last_active DESC", conn)
-    except Exception as e:
-        st.error(f"⚠️ خطأ في جلب بيانات المستخدمين: {e}")
-    return pd.DataFrame()
+    df = execute_query("SELECT device_id, phone, status, sub_tier, is_frozen, expiry_date, bot_status, app_version, accepted_clicks, last_active, notice_message, last_ip FROM myapp.users_status ORDER BY last_active DESC", fetch=True)
+    return df if df is not None else pd.DataFrame()
 
 @st.cache_data(ttl=10)
 def load_subs_data():
-    try:
-        if conn and conn.closed == 0:
-            return pd.read_sql("SELECT id, code, sub_tier, duration_days, is_used, used_by_device, used_at FROM myapp.subscriptions ORDER BY id DESC", conn)
-    except Exception as e:
-        st.error(f"⚠️ خطأ في جلب بيانات الأكواد: {e}")
-    return pd.DataFrame()
+    df = execute_query("SELECT id, code, sub_tier, duration_days, is_used, used_by_device, used_at FROM myapp.subscriptions ORDER BY id DESC", fetch=True)
+    return df if df is not None else pd.DataFrame()
 
 @st.cache_data(ttl=10)
 def load_security_logs():
-    try:
-        if conn and conn.closed == 0:
-            return pd.read_sql("SELECT id, device_id, phone, action, reason, created_at FROM myapp.security_logs ORDER BY created_at DESC LIMIT 500", conn)
-    except Exception:
-        pass
-    return pd.DataFrame()
+    df = execute_query("SELECT id, device_id, phone, action, reason, created_at FROM myapp.security_logs ORDER BY created_at DESC LIMIT 500", fetch=True)
+    return df if df is not None else pd.DataFrame()
 
 @st.cache_data(ttl=15)
 def load_config_data():
-    try:
-        if conn and conn.closed == 0:
-            config_rows = pd.read_sql("SELECT key, value FROM myapp.app_config", conn)
-            return dict(zip(config_rows['key'], config_rows['value']))
-    except Exception:
-        pass
+    df = execute_query("SELECT key, value FROM myapp.app_config", fetch=True)
+    if df is not None and not df.empty:
+        return dict(zip(df['key'], df['value']))
     return {'latest_version': '7.2.0', 'update_url': '', 'force_update': 'true', 'update_message': 'يرجى التحديث'}
 
 # =====================================================================
 # تهيئة الجداول وتحديث الهيكل الذاتي وصلاحيات الأدمن
 # =====================================================================
 try:
-    if conn and conn.closed == 0:
-        cur = conn.cursor()
-        cur.execute("CREATE SCHEMA IF NOT EXISTS myapp;")
-        
-        # ميزة الإصلاح التلقائي لقاعدة البيانات (Fix missing columns)
-        db_patches = [
-            "ALTER TABLE myapp.users_status ADD COLUMN IF NOT EXISTS sub_tier VARCHAR(20) DEFAULT 'STANDARD'",
-            "ALTER TABLE myapp.users_status ADD COLUMN IF NOT EXISTS is_frozen BOOLEAN DEFAULT FALSE",
-            "ALTER TABLE myapp.users_status ADD COLUMN IF NOT EXISTS last_ip VARCHAR(100)",
-            "ALTER TABLE myapp.subscriptions ADD COLUMN IF NOT EXISTS sub_tier VARCHAR(50) DEFAULT 'STANDARD'"
-        ]
-        for patch in db_patches:
-            try:
-                cur.execute(patch)
-            except:
-                conn.rollback()
-        
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS myapp.app_permissions (
-                id SERIAL PRIMARY KEY,
-                username VARCHAR(50) UNIQUE NOT NULL,
-                password VARCHAR(100) NOT NULL,
-                role_name VARCHAR(50),
-                allowed_sections TEXT[],
-                is_active BOOLEAN DEFAULT TRUE
-            );
-        """)
-        cur.execute("ALTER TABLE myapp.app_permissions ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE;")
-        
-        all_secs = [
-            "📈 نظرة عامة وإحصائيات الإصدارات",
-            "👥 إدارة ومراقبة المستخدمين والتفعيل", 
-            "📢 مركز الإشعارات الشامل الكامل",
-            "🛡️ سجلات الأمان والرقابة",
-            "🔄 لوحة LIVE UPDATE",
-            "🚀 إدارة التحديثات الإجبارية", 
-            "🎫 توليد وإدارة الأكواد", 
-            "🤝 قسم الشركاء (الموزعين)", 
-            "📈 تحليل البيانات", 
-            "🖥️ حالة السيرفر", 
-            "🔐 إدارة الصلاحيات والتحكم", 
-            "🛠️ الدعم الفني والتواصل"
-        ]
+    execute_query("CREATE SCHEMA IF NOT EXISTS myapp;")
+    
+    db_patches = [
+        "ALTER TABLE myapp.users_status ADD COLUMN IF NOT EXISTS sub_tier VARCHAR(20) DEFAULT 'STANDARD'",
+        "ALTER TABLE myapp.users_status ADD COLUMN IF NOT EXISTS is_frozen BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE myapp.users_status ADD COLUMN IF NOT EXISTS last_ip VARCHAR(100)",
+        "ALTER TABLE myapp.subscriptions ADD COLUMN IF NOT EXISTS sub_tier VARCHAR(50) DEFAULT 'STANDARD'",
+        "ALTER TABLE myapp.subscriptions ADD COLUMN IF NOT EXISTS sub_type VARCHAR(50) DEFAULT 'STANDARD'"
+    ]
+    for patch in db_patches:
+        execute_query(patch)
 
-        cur.execute("SELECT COUNT(*) FROM myapp.app_permissions WHERE username = 'admin'")
-        if cur.fetchone()[0] == 0:
-            cur.execute("INSERT INTO myapp.app_permissions (username, password, role_name, allowed_sections, is_active) VALUES ('admin', 'admin123', 'مدير النظام', %s, TRUE)", (all_secs,))
-        else:
-            cur.execute("UPDATE myapp.app_permissions SET allowed_sections = %s WHERE username = 'admin'", (all_secs,))
-        
-        conn.commit()
-        cur.close()
+    execute_query("""
+        CREATE TABLE IF NOT EXISTS myapp.app_permissions (
+            id SERIAL PRIMARY KEY,
+            username VARCHAR(50) UNIQUE NOT NULL,
+            password VARCHAR(100) NOT NULL,
+            role_name VARCHAR(50),
+            allowed_sections TEXT[],
+            is_active BOOLEAN DEFAULT TRUE
+        );
+    """)
+    
+    all_secs = [
+        "📈 نظرة عامة وإحصائيات الإصدارات",
+        "👥 إدارة ومراقبة المستخدمين والتفعيل", 
+        "📢 مركز الإشعارات الشامل الكامل",
+        "🛡️ سجلات الأمان والرقابة",
+        "🔄 لوحة LIVE UPDATE",
+        "🚀 إدارة التحديثات الإجبارية", 
+        "🎫 توليد وإدارة الأكواد", 
+        "🤝 قسم الشركاء (الموزعين)", 
+        "📈 تحليل البيانات", 
+        "🖥️ حالة السيرفر", 
+        "🔐 إدارة الصلاحيات والتحكم", 
+        "🛠️ الدعم الفني والتواصل"
+    ]
+
+    admin_check = execute_query("SELECT COUNT(*) FROM myapp.app_permissions WHERE username = 'admin'", fetch=True)
+    if admin_check is not None and not admin_check.empty and admin_check.iloc[0, 0] == 0:
+        execute_query("INSERT INTO myapp.app_permissions (username, password, role_name, allowed_sections, is_active) VALUES ('admin', %s, 'مدير النظام', %s, TRUE)", (hash_password('admin123'), all_secs,))
+    else:
+        execute_query("UPDATE myapp.app_permissions SET allowed_sections = %s WHERE username = 'admin'", (all_secs,))
 except Exception as e:
-    if conn:
-        try:
-            conn.rollback()
-        except Exception:
-            pass
+    st.error(f"خطأ أثناء تهيئة هيكل قاعدة البيانات: {e}")
 
 # =====================================================================
 # نظام المصادقة
@@ -245,27 +206,19 @@ if not st.session_state.logged:
         u = st.text_input("اسم المستخدم:")
         p = st.text_input("كلمة المرور:", type="password")
         if st.form_submit_button("تسجيل الدخول 🚀"):
-            try:
-                if conn and conn.closed == 0:
-                    cur = conn.cursor()
-                    cur.execute("SELECT password, allowed_sections, is_active FROM myapp.app_permissions WHERE username = %s", (u,))
-                    res = cur.fetchone()
-                    cur.close()
-                    if res and res[2] and res[0] == p:
-                        st.session_state.logged = True
-                        st.session_state.user = u
-                        # تحديث تلقائي للأقسام للأدمن لضمان ظهور الميزات الجديدة دائماً
-                        if u == 'admin':
-                            st.session_state.sections = all_secs
-                        else:
-                            st.session_state.sections = res[1] if res[1] else []
-                        st.rerun()
-                    else:
-                        st.error("بيانات الدخول غير صحيحة أو الحساب معطل.")
+            res = execute_query("SELECT password, allowed_sections, is_active FROM myapp.app_permissions WHERE username = %s", (u,), fetch=True)
+            if res is not None and not res.empty:
+                user_pass, user_secs, is_active = res.iloc[0]['password'], res.iloc[0]['allowed_sections'], res.iloc[0]['is_active']
+                # دعم الحسابات القديمة وغير المشفرة مع تشفير الحسابات الجديدة
+                if is_active and (user_pass == p or user_pass == hash_password(p)):
+                    st.session_state.logged = True
+                    st.session_state.user = u
+                    st.session_state.sections = all_secs if u == 'admin' else (user_secs if user_secs is not None else [])
+                    st.rerun()
                 else:
-                    st.error("فشل الاتصال بقاعدة البيانات.")
-            except Exception as login_err:
-                st.error(f"خطأ أثناء تسجيل الدخول: {login_err}")
+                    st.error("بيانات الدخول غير صحيحة أو الحساب معطل.")
+            else:
+                st.error("اسم المستخدم غير موجود.")
     st.stop()
 
 # =====================================================================
@@ -300,7 +253,7 @@ if page == "📈 نظرة عامة وإحصائيات الإصدارات":
     active_subs = len(df_u[df_u['status'] == 'Active']) if not df_u.empty else 0
     expired_subs = len(df_u[df_u['status'] == 'Expired']) if not df_u.empty else 0
     online_bots = len(df_u[df_u['bot_status'] == 'Online']) if not df_u.empty else 0
-    total_clicks = int(df_u['accepted_clicks'].sum()) if not df_u.empty else 0
+    total_clicks = int(df_u['accepted_clicks'].sum()) if not df_u.empty and 'accepted_clicks' in df_u.columns else 0
 
     col1, col2, col3, col4, col5 = st.columns(5)
     col1.metric("👥 إجمالي الأجهزة", total_subs)
@@ -332,15 +285,14 @@ elif page == "👥 إدارة ومراقبة المستخدمين والتفعي
     df_users = load_users_data()
     
     if not df_users.empty:
-        # نظام البحث والفلترة المتقدم
         st.subheader("🔍 البحث عن مستخدم")
         search_query = st.text_input("أدخل رقم الهاتف أو معرف الجهاز للبحث:", placeholder="مثال: 079xxxxxxx")
         
         filtered_df = df_users
         if search_query:
             filtered_df = df_users[
-                df_users['phone'].str.contains(search_query, na=False) | 
-                df_users['device_id'].str.contains(search_query, na=False)
+                df_users['phone'].astype(str).str.contains(search_query, na=False) | 
+                df_users['device_id'].astype(str).str.contains(search_query, na=False)
             ]
         
         if filtered_df.empty:
@@ -352,13 +304,12 @@ elif page == "👥 إدارة ومراقبة المستخدمين والتفعي
             st.subheader("🛠️ لوحة التحكم في الجهاز المختار")
             
             device_list = filtered_df['device_id'].tolist()
-            options = [f"📱 {p} | 🆔 {d[:12]}... | 🏷️ {s}" for p, d, s in zip(filtered_df['phone'], device_list, filtered_df['status'])]
+            options = [f"📱 {p} | 🆔 {str(d)[:12]}... | 🏷️ {s}" for p, d, s in zip(filtered_df['phone'], device_list, filtered_df['status'])]
             
             selected_idx = st.selectbox("اختر الحساب المطلوب معالجته:", range(len(options)), format_func=lambda x: options[x])
             target_device = device_list[selected_idx]
             target_row = filtered_df[filtered_df['device_id'] == target_device].iloc[0]
             
-            # عرض بطاقة معلومات سريعة
             c1, c2, c3 = st.columns(3)
             with c1: st.info(f"📞 الهاتف: {target_row['phone']}")
             with c2: st.info(f"📅 الانتهاء: {target_row['expiry_date']}")
@@ -369,12 +320,12 @@ elif page == "👥 إدارة ومراقبة المستخدمين والتفعي
             with st.form("edit_user_activation_form"):
                 col_e1, col_e2 = st.columns(2)
                 with col_e1:
-                    new_phone = st.text_input("تعديل رقم الهاتف:", value=str(target_row['phone']) if target_row['phone'] else "")
+                    new_phone = st.text_input("تعديل رقم الهاتف:", value=str(target_row['phone']) if pd.notnull(target_row['phone']) else "")
                     new_status = st.selectbox("تغيير الحالة:", ["Active", "Expired", "Blocked"], index=["Active", "Expired", "Blocked"].index(target_row['status']) if target_row['status'] in ["Active", "Expired", "Blocked"] else 0)
                     new_sub_tier = st.selectbox("فئة الاشتراك:", ["TRIAL", "STANDARD", "VIP"], index=["TRIAL", "STANDARD", "VIP"].index(target_row['sub_tier']) if target_row['sub_tier'] in ["TRIAL", "STANDARD", "VIP"] else 1)
-                    is_frozen = st.checkbox("تجميد الحساب (Freeze)", value=target_row['is_frozen'])
+                    is_frozen = st.checkbox("تجميد الحساب (Freeze)", value=bool(target_row['is_frozen']))
                 with col_e2:
-                    current_expiry = pd.to_datetime(target_row['expiry_date']) if target_row['expiry_date'] else datetime.now()
+                    current_expiry = pd.to_datetime(target_row['expiry_date']) if pd.notnull(target_row['expiry_date']) else datetime.now()
                     new_expiry_date = st.date_input("تاريخ الانتهاء الجديد:", value=current_expiry.date())
                     new_expiry_time = st.time_input("وقت الانتهاء:", value=current_expiry.time())
                 
@@ -386,20 +337,19 @@ elif page == "👥 إدارة ومراقبة المستخدمين والتفعي
                 
                 if save_clicked:
                     full_expiry = datetime.combine(new_expiry_date, new_expiry_time)
-                    if query("UPDATE myapp.users_status SET phone = %s, status = %s, sub_tier = %s, is_frozen = %s, expiry_date = %s WHERE device_id = %s", (new_phone, new_status, new_sub_tier, is_frozen, full_expiry, target_device)):
+                    if execute_query("UPDATE myapp.users_status SET phone = %s, status = %s, sub_tier = %s, is_frozen = %s, expiry_date = %s WHERE device_id = %s", (new_phone, new_status, new_sub_tier, is_frozen, full_expiry, target_device)):
                         st.cache_data.clear()
                         st.success("✅ تم تحديث البيانات بنجاح!")
                         st.rerun()
 
                 if reset_device_clicked:
-                    # ميزة Reset: تسمح للمستخدم بالدخول من جهاز جديد بنفس الرقم
-                    if query("DELETE FROM myapp.users_status WHERE device_id = %s", (target_device,)):
+                    if execute_query("DELETE FROM myapp.users_status WHERE device_id = %s", (target_device,)):
                         st.cache_data.clear()
-                        st.success(f"✅ تم فك الارتباط بنجاح. يمكن للكابتن صاحب الرقم ({target_row['phone']}) تسجيل الدخول الآن من أي جهاز آخر.")
+                        st.success(f"✅ تم فك الارتباط بنجاح. يمكن صاحب الرقم ({target_row['phone']}) تسجيل الدخول الآن من أي جهاز آخر.")
                         st.rerun()
                         
                 if delete_clicked:
-                    if query("DELETE FROM myapp.users_status WHERE device_id = %s", (target_device,)):
+                    if execute_query("DELETE FROM myapp.users_status WHERE device_id = %s", (target_device,)):
                         st.cache_data.clear()
                         st.error("🗑️ تم حذف الحساب بالكامل من النظام.")
                         st.rerun()
@@ -422,7 +372,7 @@ elif page == "📢 مركز الإشعارات الشامل الكامل":
 
             if notif_target_type == "إشعار لجهاز/مستخدم فردي عبر رقم الهاتف أو ID":
                 if not df_notif_users.empty:
-                    dev_options = [f"هاتف: {p} | حالة: {s} | ID: {d[:10]}..." for p, s, d in zip(df_notif_users['phone'], df_notif_users['status'], df_notif_users['device_id'])]
+                    dev_options = [f"هاتف: {p} | حالة: {s} | ID: {str(d)[:10]}..." for p, s, d in zip(df_notif_users['phone'], df_notif_users['status'], df_notif_users['device_id'])]
                     selected_dev_idx = st.selectbox("اختر الجهاز المستهدف:", range(len(dev_options)), format_func=lambda x: dev_options[x])
                     target_device_id = df_notif_users['device_id'].tolist()[selected_dev_idx]
                 else:
@@ -444,18 +394,18 @@ elif page == "📢 مركز الإشعارات الشامل الكامل":
                     
                     success_flag = False
                     if notif_target_type == "إشعار لجهاز/مستخدم فردي عبر رقم الهاتف أو ID" and target_device_id:
-                        success_flag = query("UPDATE myapp.users_status SET notice_message = %s WHERE device_id = %s", (formatted_msg, target_device_id))
+                        success_flag = execute_query("UPDATE myapp.users_status SET notice_message = %s WHERE device_id = %s", (formatted_msg, target_device_id))
                     elif notif_target_type == "إشعار لمجموعة محددة (حسب الحالة أو النوع)":
                         if "Active" in target_group:
-                            success_flag = query("UPDATE myapp.users_status SET notice_message = %s WHERE status = 'Active'", (formatted_msg,))
+                            success_flag = execute_query("UPDATE myapp.users_status SET notice_message = %s WHERE status = 'Active'", (formatted_msg,))
                         elif "Expired" in target_group:
-                            success_flag = query("UPDATE myapp.users_status SET notice_message = %s WHERE status = 'Expired'", (formatted_msg,))
+                            success_flag = execute_query("UPDATE myapp.users_status SET notice_message = %s WHERE status = 'Expired'", (formatted_msg,))
                         elif "VIP" in target_group:
-                            success_flag = query("UPDATE myapp.users_status SET notice_message = %s WHERE subscription_type = 'VIP'", (formatted_msg,))
+                            success_flag = execute_query("UPDATE myapp.users_status SET notice_message = %s WHERE sub_tier = 'VIP'", (formatted_msg,))
                         elif "TRIAL" in target_group:
-                            success_flag = query("UPDATE myapp.users_status SET notice_message = %s WHERE subscription_type = 'TRIAL'", (formatted_msg,))
+                            success_flag = execute_query("UPDATE myapp.users_status SET notice_message = %s WHERE sub_tier = 'TRIAL'", (formatted_msg,))
                     elif notif_target_type == "إشعار عام لجميع المشتركين":
-                        success_flag = query("UPDATE myapp.users_status SET notice_message = %s", (formatted_msg,))
+                        success_flag = execute_query("UPDATE myapp.users_status SET notice_message = %s", (formatted_msg,))
 
                     if success_flag:
                         st.cache_data.clear()
@@ -468,7 +418,7 @@ elif page == "📢 مركز الإشعارات الشامل الكامل":
             if not pending_notifs.empty:
                 st.dataframe(pending_notifs[['device_id', 'phone', 'notice_message']], use_container_width=True)
                 if st.button("🗑️ مسح وإلغاء كافة الإشعارات المعلقة لمجمل الأجهزة"):
-                    if query("UPDATE myapp.users_status SET notice_message = NULL"):
+                    if execute_query("UPDATE myapp.users_status SET notice_message = NULL"):
                         st.cache_data.clear()
                         st.success("تم مسح جميع الإشعارات المعلقة بنجاح.")
                         st.rerun()
@@ -477,13 +427,11 @@ elif page == "📢 مركز الإشعارات الشامل الكامل":
 
 elif page == "🛡️ سجلات الأمان والرقابة":
     st.title("🛡️ سجلات الأمان ومراقبة محاولات التلاعب")
-    st.info("من هنا يمكنك متابعة كافة محاولات التفعيل الفاشلة أو محاولات استخدام الأكواد على أكثر من جهاز.")
-    
     logs_df = load_security_logs()
     if not logs_df.empty:
         st.dataframe(logs_df, use_container_width=True)
         if st.button("🗑️ مسح كافة سجلات الأمان"):
-            if query("DELETE FROM myapp.security_logs"):
+            if execute_query("DELETE FROM myapp.security_logs"):
                 st.cache_data.clear()
                 st.success("تم مسح السجلات بنجاح.")
                 st.rerun()
@@ -492,24 +440,29 @@ elif page == "🛡️ سجلات الأمان والرقابة":
 
 elif page == "🔄 لوحة LIVE UPDATE":
     st.title("🔄 لوحة التحكم الفوري - LIVE UPDATE")
-    st.info("💡 من هنا يمكنك تحديث الكلمات المفتاحية والمؤشرات وروابط السيرفر فوراً دون الحاجة لتحديث التطبيق.")
     conf = load_config_data()
     
     with st.form("live_update_form"):
         st.subheader("📝 الكلمات المفتاحية والمؤشرات")
-        lk = st.text_area("الكلمات المفتاحية للقبول (live_keywords):", value=conf.get('live_keywords', ''), help="افصل بين الكلمات بفاصلة (،)")
-        li = st.text_area("مؤشرات الطلب (live_indicators):", value=conf.get('live_indicators', ''), help="افصل بين المؤشرات بفاصلة (،)")
+        lk = st.text_area("الكلمات المفتاحية للقبول (live_keywords):", value=conf.get('live_keywords', ''))
+        li = st.text_area("مؤشرات الطلب (live_indicators):", value=conf.get('live_indicators', ''))
         
         st.markdown("---")
         st.subheader("🌐 توجيه السيرفر والسرعة")
-        n_url = st.text_input("رابط الـ API القادم (next_api_url):", value=conf.get('next_api_url', ''), help="سيتم استخدامه لتوجيه التطبيق إلى دومين جديد تلقائياً")
-        c_delay = st.number_input("تأخير النقرات بالمللي ثانية (click_delay):", min_value=1, max_value=5000, value=int(conf.get('click_delay', 500)), help="كلما قل الرقم زادت سرعة النقر (500ms = نصف ثانية)")
+        n_url = st.text_input("رابط الـ API القادم (next_api_url):", value=conf.get('next_api_url', ''))
+        
+        try:
+            default_delay = int(conf.get('click_delay', 500))
+        except ValueError:
+            default_delay = 500
+            
+        c_delay = st.number_input("تأخير النقرات بالمللي ثانية (click_delay):", min_value=1, max_value=5000, value=default_delay)
         
         if st.form_submit_button("🚀 حفظ ونشر التحديثات الحية"):
-            query("INSERT INTO myapp.app_config (key, value) VALUES ('live_keywords', %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", (lk,))
-            query("INSERT INTO myapp.app_config (key, value) VALUES ('live_indicators', %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", (li,))
-            query("INSERT INTO myapp.app_config (key, value) VALUES ('next_api_url', %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", (n_url,))
-            query("INSERT INTO myapp.app_config (key, value) VALUES ('click_delay', %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", (str(c_delay),))
+            execute_query("INSERT INTO myapp.app_config (key, value) VALUES ('live_keywords', %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", (lk,))
+            execute_query("INSERT INTO myapp.app_config (key, value) VALUES ('live_indicators', %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", (li,))
+            execute_query("INSERT INTO myapp.app_config (key, value) VALUES ('next_api_url', %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", (n_url,))
+            execute_query("INSERT INTO myapp.app_config (key, value) VALUES ('click_delay', %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", (str(c_delay),))
             
             st.cache_data.clear()
             st.success("✅ تم حفظ ونشر التحديثات الحية بنجاح!")
@@ -525,13 +478,13 @@ elif page == "🚀 إدارة التحديثات الإجبارية":
         forced = st.selectbox("حالة التحديث الإجباري:", ["true", "false"], index=0 if conf.get('force_update', 'true') == 'true' else 1)
         
         if st.form_submit_button("حفظ ونشر التحديث الإجباري 🚀"):
-            query("INSERT INTO myapp.app_config (key, value) VALUES ('latest_version', %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", (v,))
-            query("INSERT INTO myapp.app_config (key, value) VALUES ('update_url', %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", (url,))
-            query("INSERT INTO myapp.app_config (key, value) VALUES ('update_message', %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", (msg,))
-            query("INSERT INTO myapp.app_config (key, value) VALUES ('force_update', %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", (forced,))
+            execute_query("INSERT INTO myapp.app_config (key, value) VALUES ('latest_version', %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", (v,))
+            execute_query("INSERT INTO myapp.app_config (key, value) VALUES ('update_url', %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", (url,))
+            execute_query("INSERT INTO myapp.app_config (key, value) VALUES ('update_message', %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", (msg,))
+            execute_query("INSERT INTO myapp.app_config (key, value) VALUES ('force_update', %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", (forced,))
             
             dialog_cmd = f"DIALOG_UPDATE:version={v}|url={url}|msg={msg}"
-            query("UPDATE myapp.users_status SET notice_message = %s", (dialog_cmd,))
+            execute_query("UPDATE myapp.users_status SET notice_message = %s", (dialog_cmd,))
             
             st.cache_data.clear()
             st.success("✅ تم تحديث ونشر إعدادات التحديث الإجباري بنجاح!")
@@ -540,13 +493,13 @@ elif page == "🚀 إدارة التحديثات الإجبارية":
 elif page == "🎫 توليد وإدارة الأكواد":
     st.title("🎫 توليد وإدارة الأكواد والاشتراكات")
     with st.form("gen"):
-        tp = st.selectbox("نوع الاشتراك:", ["VIP", "TRIAL"])
+        tp = st.selectbox("نوع الاشتراك:", ["VIP", "TRIAL", "STANDARD"])
         days = st.number_input("المدة بالأيام:", min_value=1, value=30)
         qty = st.number_input("الكمية المراد توليدها:", min_value=1, value=10)
         if st.form_submit_button("توليد الأكواد الآن 🚀"):
             for _ in range(qty):
                 code = tp[:3].upper() + ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
-                query("INSERT INTO myapp.subscriptions (code, sub_type, duration_days, is_used) VALUES (%s, %s, %s, FALSE) ON CONFLICT DO NOTHING", (code, tp, days))
+                execute_query("INSERT INTO myapp.subscriptions (code, sub_tier, sub_type, duration_days, is_used) VALUES (%s, %s, %s, %s, FALSE) ON CONFLICT DO NOTHING", (code, tp, tp, days))
             st.cache_data.clear()
             st.success(f"تم توليد {qty} كود اشتراك بنجاح.")
             st.rerun()
@@ -563,17 +516,13 @@ elif page == "🤝 قسم الشركاء (الموزعين)":
 
 elif page == "📈 تحليل البيانات":
     st.title("📈 تحليل البيانات وأوقات الذروة للطلبات")
-    try:
-        if conn and conn.closed == 0:
-            df_orders = pd.read_sql("SELECT order_time, price FROM myapp.accepted_orders LIMIT 2000", conn)
-            if not df_orders.empty:
-                df_orders['hour'] = pd.to_datetime(df_orders['order_time']).dt.hour
-                fig = px.bar(df_orders.groupby('hour').size().reset_index(name='count'), x='hour', y='count', title="أوقات الذروة للطلبات المقبولة حسب الساعة")
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.info("لا توجد سجلات طلبات كافية لعرض الرسومات البيانية.")
-    except Exception:
-        st.info("بيانات الطلبات غير متوفرة في قاعدة البيانات حالياً.")
+    df_orders = execute_query("SELECT order_time, price FROM myapp.accepted_orders LIMIT 2000", fetch=True)
+    if df_orders is not None and not df_orders.empty:
+        df_orders['hour'] = pd.to_datetime(df_orders['order_time']).dt.hour
+        fig = px.bar(df_orders.groupby('hour').size().reset_index(name='count'), x='hour', y='count', title="أوقات الذروة للطلبات المقبولة حسب الساعة")
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("لا توجد سجلات طلبات كافية لعرض الرسومات البيانية.")
 
 elif page == "🖥️ حالة السيرفر":
     st.title("🖥️ مراقبة حالة الخادم وقاعدة البيانات")
@@ -584,75 +533,54 @@ elif page == "🔐 إدارة الصلاحيات والتحكم":
     st.title("🔐 إدارة حسابات لوحة التحكم وصلاحيات الأقسام")
     tab_add, tab_edit, tab_view = st.tabs(["➕ إضافة حساب جديد", "✏️ تعديل صلاحيات حساب موجود", "📋 عرض وحذف الحسابات"])
 
-    all_secs_list = [
-        "📈 نظرة عامة وإحصائيات الإصدارات",
-        "👥 إدارة ومراقبة المستخدمين والتفعيل", 
-        "📢 مركز الإشعارات الشامل الكامل",
-        "🛡️ سجلات الأمان والرقابة",
-        "🔄 لوحة LIVE UPDATE",
-        "🚀 إدارة التحديثات الإجبارية", 
-        "🎫 توليد وإدارة الأكواد", 
-        "🤝 قسم الشركاء (الموزعين)", 
-        "📈 تحليل البيانات", 
-        "🖥️ حالة السيرفر", 
-        "🔐 إدارة الصلاحيات والتحكم", 
-        "🛠️ الدعم الفني والتواصل"
-    ]
-
     with tab_add:
         with st.form("add_user_perm"):
             new_u = st.text_input("اسم المستخدم الجديد:")
             new_p = st.text_input("كلمة المرور:", type="password")
             role_desc = st.text_input("مسمى الوظيفة / الوصف:")
-            p_adds = {}
-            for sec in all_secs_list:
-                p_adds[sec] = st.checkbox(sec, value=(sec == "🤝 قسم الشركاء (الموزعين)"))
+            p_adds = {sec: st.checkbox(sec, value=(sec == "🤝 قسم الشركاء (الموزعين)")) for sec in all_secs}
             if st.form_submit_button("حفظ الحساب والصلاحيات 💾"):
                 if not new_u or not new_p:
                     st.error("يرجى إدخال اسم المستخدم وكلمة المرور!")
                 else:
                     chosen_secs = [sec for sec, val in p_adds.items() if val]
-                    if query("INSERT INTO myapp.app_permissions (username, password, role_name, allowed_sections, is_active) VALUES (%s, %s, %s, %s, TRUE) ON CONFLICT (username) DO NOTHING", (new_u, new_p, role_desc, chosen_secs)):
+                    hashed_p = hash_password(new_p)
+                    if execute_query("INSERT INTO myapp.app_permissions (username, password, role_name, allowed_sections, is_active) VALUES (%s, %s, %s, %s, TRUE) ON CONFLICT (username) DO NOTHING", (new_u, hashed_p, role_desc, chosen_secs)):
                         st.success(f"تم إنشاء حساب ({new_u}) بنجاح!")
                         st.rerun()
 
     with tab_edit:
-        if conn and conn.closed == 0:
-            cur = conn.cursor()
-            cur.execute("SELECT username FROM myapp.app_permissions")
-            usernames = [r[0] for r in cur.fetchall()]
-            cur.close()
-            if usernames:
-                selected_edit_user = st.selectbox("اختر المستخدم المراد تعديله:", usernames)
-                cur = conn.cursor()
-                cur.execute("SELECT password, role_name, allowed_sections FROM myapp.app_permissions WHERE username = %s", (selected_edit_user,))
-                u_data = cur.fetchone()
-                cur.close()
-                if u_data:
-                    old_pass, old_role, old_secs = u_data[0], u_data[1], u_data[2] if u_data[2] else []
-                    with st.form("edit_user_perm_form"):
-                        edit_p = st.text_input("تعديل كلمة المرور:", value=old_pass, type="password")
-                        edit_role = st.text_input("تعديل المسمى الوظيفي:", value=old_role if old_role else "")
-                        p_edits = {}
-                        for sec in all_secs_list:
-                            p_edits[sec] = st.checkbox(sec, value=(sec in old_secs), key=f"edit_{selected_edit_user}_{sec}")
-                        if st.form_submit_button("حفظ التعديلات والتحديث 🔄"):
-                            updated_secs = [sec for sec, val in p_edits.items() if val]
-                            if query("UPDATE myapp.app_permissions SET password = %s, role_name = %s, allowed_sections = %s WHERE username = %s", (edit_p, edit_role, updated_secs, selected_edit_user)):
-                                st.success(f"✅ تم تحديث صلاحيات الحساب ({selected_edit_user}) بنجاح!")
-                                st.rerun()
+        users_df = execute_query("SELECT username FROM myapp.app_permissions", fetch=True)
+        if users_df is not None and not users_df.empty:
+            usernames = users_df['username'].tolist()
+            selected_edit_user = st.selectbox("اختر المستخدم المراد تعديله:", usernames)
+            u_data = execute_query("SELECT password, role_name, allowed_sections FROM myapp.app_permissions WHERE username = %s", (selected_edit_user,), fetch=True)
+            if u_data is not None and not u_data.empty:
+                old_pass = u_data.iloc[0]['password']
+                old_role = u_data.iloc[0]['role_name']
+                old_secs = u_data.iloc[0]['allowed_sections'] if u_data.iloc[0]['allowed_sections'] is not None else []
+                with st.form("edit_user_perm_form"):
+                    edit_p = st.text_input("تعديل كلمة المرور (أتركها كما هي للعدم التغيير):", value=old_pass, type="password")
+                    edit_role = st.text_input("تعديل المسمى الوظيفي:", value=old_role if old_role else "")
+                    p_edits = {sec: st.checkbox(sec, value=(sec in old_secs), key=f"edit_{selected_edit_user}_{sec}") for sec in all_secs}
+                    if st.form_submit_button("حفظ التعديلات والتحديث 🔄"):
+                        updated_secs = [sec for sec, val in p_edits.items() if val]
+                        new_pass_final = edit_p if edit_p == old_pass else hash_password(edit_p)
+                        if execute_query("UPDATE myapp.app_permissions SET password = %s, role_name = %s, allowed_sections = %s WHERE username = %s", (new_pass_final, edit_role, updated_secs, selected_edit_user)):
+                            st.success(f"✅ تم تحديث صلاحيات الحساب ({selected_edit_user}) بنجاح!")
+                            st.rerun()
 
     with tab_view:
-        if conn and conn.closed == 0:
-            df_perms = pd.read_sql("SELECT id, username, role_name, is_active FROM myapp.app_permissions", conn)
+        df_perms = execute_query("SELECT id, username, role_name, is_active FROM myapp.app_permissions", fetch=True)
+        if df_perms is not None:
             st.dataframe(df_perms, use_container_width=True)
-            target_user_del = st.text_input("أدخل اسم المستخدم المراد حذفه نهائياً:")
-            if st.button("حذف الحساب 🗑️"):
-                if target_user_del == "admin":
-                    st.error("لا يمكن حذف حساب الأدمن الرئيسي للنظام!")
-                elif query("DELETE FROM myapp.app_permissions WHERE username = %s", (target_user_del,)):
-                    st.success(f"تم حذف الحساب ({target_user_del}) بنجاح.")
-                    st.rerun()
+        target_user_del = st.text_input("أدخل اسم المستخدم المراد حذفه نهائياً:")
+        if st.button("حذف الحساب 🗑️"):
+            if target_user_del == "admin":
+                st.error("لا يمكن حذف حساب الأدمن الرئيسي للنظام!")
+            elif execute_query("DELETE FROM myapp.app_permissions WHERE username = %s", (target_user_del,)):
+                st.success(f"تم حذف الحساب ({target_user_del}) بنجاح.")
+                st.rerun()
 
 elif page == "🛠️ الدعم الفني والتواصل":
     st.title("🛠️ الدعم الفني وقنوات التواصل")
