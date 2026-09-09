@@ -1,144 +1,157 @@
-/**
- * MyClicker Pro - MASTER SERVER v3.1
- * ALL-IN-ONE: Global Pass, Notifications, Force Update, Security Logs, Neon DB.
- */
+import streamlit as st
+import pandas as pd
+import psycopg2
+from psycopg2.extras import RealDictCursor
+import datetime
+import hashlib
+import plotly.express as px
+import os
+from dotenv import load_dotenv
 
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
-const express = require('express');
-const { Pool } = require('pg');
-require('dotenv').config();
+# 1. إعدادات الصفحة
+load_dotenv()
+st.set_page_config(page_title="MyClicker Control Center", layout="wide", page_icon="⚡")
 
-const app = express();
-app.use(express.json());
+# اتصال قاعدة البيانات (Neon)
+def get_db_connection():
+    return psycopg2.connect(os.getenv("DATABASE_URL"), sslmode='require')
 
-const PORT = process.env.PORT || 8080;
-const ADMIN_KEY = process.env.ADMIN_KEY || "admin123";
+def hash_password(password):
+    return hashlib.sha256(password.encode()).hexdigest()
 
-// 1. الربط الاحترافي (Neon Pool)
-const pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
-    max: 25,
-    ssl: { rejectUnauthorized: false }
-});
+# 2. نظام الدخول
+if 'authenticated' not in st.session_state:
+    st.session_state.authenticated = False
 
-function getRemainingDays(expiryDate) {
-    if (!expiryDate) return 0;
-    const diff = new Date(expiryDate) - new Date();
-    return Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
-}
+if not st.session_state.authenticated:
+    st.title("🔐 بوابة الإدارة")
+    user = st.text_input("اسم المستخدم")
+    pw = st.text_input("كلمة المرور", type="password")
+    if st.button("دخول"):
+        if user == "admin" and hash_password(pw) == "240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9": # admin123
+            st.session_state.authenticated = True
+            st.session_state.username = user
+            st.rerun()
+        else:
+            st.error("خطأ في البيانات")
+    st.stop()
 
-// 2. بوابة الفحص
-app.get(['/', '/api/test'], (req, res) => {
-    res.json({ status: "Active", version: "3.1.0", database: "Connected ✅" });
-});
+# 3. القائمة الجانبية
+menu = st.sidebar.radio("التحكم", ["📊 نظرة عامة", "👥 الأجهزة", "🎫 الأكواد", "📢 التحديثات والاشعارات", "🛡️ الأمن"])
 
-// 3. بوابة المزامنة (التحكم الكامل)
-app.post(['/api/sync', '/sync'], async (req, res) => {
-    const { secretKey, deviceId, phone, appVersion } = req.body;
-    try {
-        if (secretKey !== ADMIN_KEY) return res.status(401).json({ status: "Error" });
+def fetch_data(query):
+    conn = get_db_connection()
+    df = pd.read_sql(query, conn)
+    conn.close()
+    return df
 
-        // جلب البيانات والإعدادات بطلب واحد (أداء عالٍ)
-        const dbRes = await pool.query(`
-            SELECT u.*, 
-            (SELECT value FROM myapp.app_config WHERE key = 'global_free_mode') as free_mode,
-            (SELECT value FROM myapp.app_config WHERE key = 'global_notice') as g_notice,
-            (SELECT value FROM myapp.app_config WHERE key = 'latest_version') as l_ver,
-            (SELECT value FROM myapp.app_config WHERE key = 'next_url') as n_url,
-            (SELECT value FROM myapp.app_config WHERE key = 'force_update') as f_upd
-            FROM myapp.users_status u WHERE u.device_id = $1
-        `, [deviceId]);
+# ---------------------------------------------------------
+# 📊 نظرة عامة & التفعيل الجماعي
+# ---------------------------------------------------------
+if menu == "📊 نظرة عامة":
+    st.header("📊 حالة النظام")
+    
+    # ميزة التفعيل الجماعي (Global Free Mode)
+    st.subheader("⚡ التحكم الجماعي بالاشتراكات")
+    current_free = fetch_data("SELECT value FROM myapp.app_config WHERE key = 'global_free_mode'")
+    is_free = current_free['value'][0] == 'true' if not current_free.empty else False
+    
+    col_a, col_b = st.columns([3, 1])
+    if is_free:
+        col_a.success("🟢 النظام حالياً مفتوح للجميع مجاناً!")
+    else:
+        col_a.warning("🔴 النظام حالياً يعمل بنظام الاشتراكات الفردية")
+    
+    if col_b.button("تبديل وضع التفعيل الجماعي 🔄"):
+        conn = get_db_connection()
+        cur = conn.cursor()
+        new_val = 'false' if is_free else 'true'
+        cur.execute("INSERT INTO myapp.app_config (key, value) VALUES ('global_free_mode', %s) ON CONFLICT (key) DO UPDATE SET value = %s", (new_val, new_val))
+        conn.commit()
+        st.rerun()
 
-        const user = dbRes.rows[0];
-        const configs = dbRes.rows[0] || {};
+# ---------------------------------------------------------
+# 👥 إدارة الأجهزة
+# ---------------------------------------------------------
+elif menu == "👥 الأجهزة":
+    st.header("👥 إدارة المستخدمين")
+    df_users = fetch_data("SELECT device_id, phone, status, sub_tier, expiry_date, app_version, last_active FROM myapp.users_status ORDER BY last_active DESC")
+    st.dataframe(df_users, use_container_width=True)
+    
+    st.subheader("🛠️ إجراء على جهاز")
+    target = st.selectbox("اختر الجهاز", df_users['device_id'])
+    act = st.selectbox("الإجراء", ["حظر", "تفعيل", "تجميد", "تنبيه خاص"])
+    val = st.text_input("نص التنبيه (في حال اخترت تنبيه)")
+    
+    if st.button("تنفيذ ⚡"):
+        conn = get_db_connection()
+        cur = conn.cursor()
+        if act == "حظر": cur.execute("UPDATE myapp.users_status SET status = 'Blocked' WHERE device_id = %s", (target,))
+        elif act == "تفعيل": cur.execute("UPDATE myapp.users_status SET status = 'Active', is_frozen = FALSE WHERE device_id = %s", (target,))
+        elif act == "تنبيه خاص": cur.execute("UPDATE myapp.users_status SET notice_message = %s WHERE device_id = %s", (val, target))
+        conn.commit()
+        st.success("تم")
 
-        if (!user) return res.json({ status: "New", redirect: "activation" });
+# ---------------------------------------------------------
+# 🎫 إدارة الأكواد
+# ---------------------------------------------------------
+elif menu == "🎫 الأكواد":
+    st.header("🎫 نظام الأكواد")
+    t1, t2 = st.tabs(["توليد أكواد", "سجل الاستخدام"])
+    
+    with t1:
+        prefix = st.text_input("البادئة", "VIP")
+        days = st.number_input("الأيام", 1, 365, 30)
+        num = st.number_input("العدد", 1, 50, 10)
+        if st.button("توليد الآن ✨"):
+            conn = get_db_connection()
+            cur = conn.cursor()
+            for _ in range(num):
+                code = f"{prefix}-{days}-{os.urandom(3).hex().upper()}"
+                cur.execute("INSERT INTO myapp.subscriptions (code, duration_days) VALUES (%s, %s)", (code, days))
+            conn.commit()
+            st.success("تم التوليد")
 
-        // --- ميزة 1: التحديث الإجباري ---
-        if (configs.f_upd === 'true' && appVersion !== configs.l_ver) {
-            return res.json({ 
-                status: "Update", redirect: "update", 
-                message: "يوجد تحديث جديد ضروري لاستمرار العمل",
-                config: { next_url: configs.n_url } 
-            });
-        }
+    with t2:
+        df_used = fetch_data("""
+            SELECT s.code, u.phone, s.used_at, s.used_by_device 
+            FROM myapp.subscriptions s 
+            JOIN myapp.users_status u ON s.used_by_device = u.device_id 
+            WHERE s.is_used = TRUE
+        """)
+        st.table(df_used)
 
-        // --- ميزة 2: التفعيل الجماعي ---
-        const isGlobalFree = configs.free_mode === 'true';
-        const days = getRemainingDays(user.expiry_date);
-        const finalStatus = (isGlobalFree || days > 0) ? "Active" : "Expired";
-        
-        // --- ميزة 3: الإشعارات الخارجية ---
-        const rawNotice = user.notice_message || configs.g_notice || "";
-        let noticePayload = null;
-        if (rawNotice) {
-            noticePayload = {
-                id: Buffer.from(rawNotice).toString('base64').substring(0, 15),
-                title: "MyClicker Admin 📢",
-                message: rawNotice
-            };
-        }
+# ---------------------------------------------------------
+# 📢 التحديثات والاشعارات
+# ---------------------------------------------------------
+elif menu == "📢 التحديثات والاشعارات":
+    st.header("📢 التحكم العام بالبوت")
+    
+    st.subheader("🚀 تحديث إجباري للجميع")
+    v = st.text_input("رقم الإصدار (مثل 7.2.8)")
+    url = st.text_input("رابط التحميل المباشر")
+    if st.button("إجبار الجميع على التحديث ⚠️"):
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("UPDATE myapp.app_config SET value = %s WHERE key = 'latest_version'", (v,))
+        cur.execute("UPDATE myapp.app_config SET value = %s WHERE key = 'next_url'", (url,))
+        cur.execute("UPDATE myapp.app_config SET value = 'true' WHERE key = 'force_update'")
+        conn.commit()
+        st.success("تم إرسال أمر التحديث لكافة الأجهزة")
 
-        res.json({
-            status: finalStatus,
-            remainingDays: isGlobalFree ? 999 : days,
-            redirect: user.status === 'Blocked' ? 'blocked' : (user.is_frozen ? 'frozen' : (finalStatus === "Expired" ? 'activation' : 'main')),
-            expiryDate: user.expiry_date ? new Date(user.expiry_date).toLocaleDateString('ar-EG') : "--/--/----",
-            subTier: isGlobalFree ? "VIP_PRO (FREE)" : (user.sub_tier || "STANDARD"),
-            notice: noticePayload,
-            config: { click_delay: "500" }
-        });
+    st.subheader("🔔 إشعار عام (بث)")
+    msg = st.text_area("نص الرسالة")
+    if st.button("بث الإشعار الآن 📢"):
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("INSERT INTO myapp.app_config (key, value) VALUES ('global_notice', %s) ON CONFLICT (key) DO UPDATE SET value = %s", (msg, msg))
+        conn.commit()
+        st.success("تم البث")
 
-        // تحديث النشاط وسجل الأمان في الخلفية
-        pool.query("UPDATE myapp.users_status SET last_active = NOW(), app_version = $1, phone = $2 WHERE device_id = $3", [appVersion, phone, deviceId]);
-
-    } catch (err) {
-        res.status(200).json({ status: "Error", message: "Database Sync Error" });
-    }
-});
-
-// 4. بوابة تفعيل الأكواد (Verify)
-app.post(['/api/verify-code', '/verify-code'], async (req, res) => {
-    const { secretKey, deviceId, phone, code } = req.body;
-    try {
-        if (secretKey !== ADMIN_KEY) return res.status(401).json({ status: "Error" });
-
-        // --- ميزة 4: أكواد المطور ---
-        if (deviceId === "d201451dda15bc31") {
-            if (code === "ACTIVATE7") {
-                let exp = new Date(); exp.setDate(exp.getDate() + 7);
-                await pool.query("UPDATE myapp.users_status SET status='Active', expiry_date=$1, phone=$2, sub_tier='TESTER' WHERE device_id=$3", [exp, phone, deviceId]);
-                return res.json({ status: "Success", message: "✅ تفعيل تجريبي للمطور" });
-            }
-            if (code === "RESET1") {
-                await pool.query("DELETE FROM myapp.users_status WHERE device_id = $1", [deviceId]);
-                return res.json({ status: "Success", message: "🔄 تصفير كامل للجهاز" });
-            }
-        }
-
-        // --- ميزة 5: نظام تراكم الأيام والأكواد ---
-        const subRes = await pool.query("SELECT * FROM myapp.subscriptions WHERE code = $1 AND is_used = FALSE", [code]);
-        const sub = subRes.rows[0];
-        if (!sub) {
-            // تسجيل محاولة فاشلة في سجل الأمان
-            pool.query("INSERT INTO myapp.security_logs (device_id, phone, action, reason) VALUES ($1, $2, 'Verify Failed', $3)", [deviceId, phone, `Invalid Code: ${code}`]);
-            return res.json({ status: "Error", message: "الكود غير صحيح أو تم استخدامه" });
-        }
-
-        let newExp = new Date();
-        const userCheck = await pool.query("SELECT expiry_date FROM myapp.users_status WHERE device_id = $1", [deviceId]);
-        if (userCheck.rows[0] && userCheck.rows[0].expiry_date > new Date()) newExp = new Date(userCheck.rows[0].expiry_date);
-        newExp.setDate(newExp.getDate() + sub.duration_days);
-
-        await pool.query("INSERT INTO myapp.users_status (device_id, phone, status, expiry_date, sub_tier) VALUES ($1, $2, 'Active', $3, $4) ON CONFLICT (device_id) DO UPDATE SET status='Active', expiry_date=$3, phone=$2, sub_tier=$4", [deviceId, phone, newExp, sub.sub_tier]);
-        await pool.query("UPDATE myapp.subscriptions SET is_used = TRUE, used_by_device = $1, used_at = NOW() WHERE code = $2", [deviceId, code]);
-
-        res.json({ status: "Success", message: "تم التفعيل بنجاح" });
-
-    } catch (err) {
-        res.status(200).json({ status: "Error", message: "Server Busy" });
-    }
-});
-
-// 5. التشغيل
-app.listen(PORT, '0.0.0.0', () => console.log(`🚀 Master Server 3.1 LIVE on ${PORT}`));
+# ---------------------------------------------------------
+# 🛡️ الأمن
+# ---------------------------------------------------------
+elif menu == "🛡️ الأمن":
+    st.header("🛡️ سجل الرقابة")
+    df_logs = fetch_data("SELECT * FROM myapp.security_logs ORDER BY created_at DESC LIMIT 50")
+    st.table(df_logs)
