@@ -1,204 +1,103 @@
 import streamlit as st
-import pandas as pd
 import psycopg2
-from psycopg2.extras import RealDictCursor
-import hashlib
-import os
-import datetime
+import pandas as pd
+import plotly.express as px
+import time
+from datetime import datetime
 
-# 1. إعدادات الهوية والجمالية (Sovereign UI)
-st.set_page_config(page_title="MyClicker Pro | المركز القيادي الأعلى", layout="wide", page_icon="👑")
+# 1. إعدادات الصفحة والهوية البصرية
+st.set_page_config(page_title="MyClicker Pro | Command Center", layout="wide", page_icon="🧊")
 
+# تصميم CSS مخصص لجعل اللوحة تبدو كالصورة التي أرسلتها (Dark Premium)
 st.markdown("""
     <style>
-    .main { background-color: #f8fafc; }
-    .stMetric { background-color: #ffffff; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); border: 1px solid #e2e8f0; }
-    .stButton>button { width: 100%; border-radius: 8px; font-weight: bold; height: 3em; transition: 0.3s; }
+    .main { background-color: #0F172A; }
+    .stMetric { background-color: #1E293B; padding: 20px; border-radius: 15px; border: 1px solid #334155; }
+    div[data-testid="stMetricValue"] { color: #38bdf8; font-weight: 900; }
+    .css-1offfwp { background-image: linear-gradient(180deg, #1E293B 0%, #0F172A 100%); }
     </style>
-""", unsafe_allow_html=True)
+    """, unsafe_allow_manager=True)
 
-# 2. إدارة قاعدة البيانات
+# 2. الاتصال بقاعدة بيانات DigitalOcean
+DB_URL = "postgresql://doadmin:1tHwqXCgn8BS6iTm942V3f7a@myclicker-db-rd7ky.db1.ondigitalocean.com:25060/mypool?sslmode=require"
+
 def get_db_connection():
-    try:
-        return psycopg2.connect(st.secrets["DATABASE_URL"], sslmode='require')
-    except Exception as e:
-        st.error(f"❌ فشل الاتصال: {e}")
-        st.stop()
+    return psycopg2.connect(DB_URL)
 
-def run_query(query, params=None, fetch=False):
+# 3. محرك المحاكاة والبيانات
+def fetch_stats():
     conn = get_db_connection()
-    cur = conn.cursor(cursor_factory=RealDictCursor)
-    try:
-        cur.execute(query, params)
-        if fetch: return cur.fetchall()
-        conn.commit()
-        return True
-    except Exception as e:
-        st.error(f"❌ خطأ: {e}")
-        return None
-    finally:
-        cur.close(); conn.close()
+    df = pd.read_sql("SELECT count(*) as total, sum(accepted_clicks) as clicks FROM myapp.users_status", conn)
+    top_users = pd.read_sql("SELECT phone, accepted_clicks, bot_status FROM myapp.users_status ORDER BY accepted_clicks DESC LIMIT 10", conn)
+    conn.close()
+    return df.iloc[0], top_users
 
-# 3. تسجيل الدخول
-if 'auth' not in st.session_state: st.session_state.auth = False
+def run_simulation_step(count):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    # محاكاة صيد عشوائي لـ 5% من الأجهزة الافتراضية
+    cur.execute("""
+        UPDATE myapp.users_status 
+        SET accepted_clicks = accepted_clicks + 1, last_active = NOW()
+        WHERE device_id IN (
+            SELECT device_id FROM myapp.users_status 
+            WHERE device_id LIKE 'test_device_%' 
+            ORDER BY RANDOM() LIMIT %s
+        )
+    """, (max(1, int(count * 0.05)),))
+    conn.commit()
+    cur.close()
+    conn.close()
 
-if not st.session_state.auth:
-    st.title("🔐 بوابة الوصول للمدراء")
-    u = st.text_input("المستخدم")
-    p = st.text_input("كلمة المرور", type="password")
-    if st.button("دخول آمن"):
-        if u == "admin" and hashlib.sha256(p.encode()).hexdigest() == "240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9":
-            st.session_state.auth = True
-            st.session_state.user = {'username': 'admin', 'role_name': 'المدير العام', 'allowed_sections': ["📊 نظرة عامة", "👥 إدارة الأجهزة", "🎫 نظام الأكواد", "📱 السوشال ميديا", "🔄 التحديثات الحية", "🔐 الصلاحيات", "🛡️ الأمن", "📢 البث الجماعي"]}
-            st.rerun()
-        else:
-            res = run_query("SELECT * FROM myapp.app_permissions WHERE username=%s AND password=%s AND is_active=TRUE", (u, hashlib.sha256(p.encode()).hexdigest()), fetch=True)
-            if res: st.session_state.auth = True; st.session_state.user = res[0]; st.rerun()
-            else: st.error("⚠️ بيانات خاطئة")
-    st.stop()
+# 4. واجهة المستخدم (Sidebar)
+st.sidebar.title("🎮 مركز التحكم بالمحاكاة")
+sim_enabled = st.sidebar.toggle("تفعيل جيش المحاكاة 🚀", value=False)
+sim_count = st.sidebar.slider("عدد الأجهزة الافتراضية", 100, 1000, 500)
 
-# 4. القائمة الجانبية
-user_data = st.session_state.user
-st.sidebar.title(f"👑 {user_data['role_name']}")
-if st.sidebar.button("🔄 تحديث شامل للبيانات"): st.cache_data.clear(); st.rerun()
-menu = st.sidebar.selectbox("القائمة القيادية", user_data['allowed_sections'])
+if st.sidebar.button("🧹 تصفير كافة النقرات"):
+    conn = get_db_connection()
+    conn.cursor().execute("UPDATE myapp.users_status SET accepted_clicks = 0")
+    conn.commit()
+    conn.close()
+    st.sidebar.success("تم التصفير بنجاح")
 
-# ---------------------------------------------------------
-# 📊 القسم 1: نظرة عامة
-# ---------------------------------------------------------
-if menu == "📊 نظرة عامة":
-    st.header("📊 لوحة مؤشرات الأداء الحية")
-    stats = run_query("""
-        SELECT (SELECT count(*) FROM myapp.users_status) as u,
-        (SELECT count(*) FROM myapp.users_status WHERE last_active > NOW() - INTERVAL '5 minutes') as online,
-        (SELECT sum(accepted_clicks) FROM myapp.users_status) as clk,
-        (SELECT count(*) FROM myapp.subscriptions WHERE is_used=FALSE) as stck
-    """, fetch=True)[0]
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("إجمالي السائقين", stats['u'])
-    c2.metric("أونلاين الآن 🟢", stats['online'])
-    c3.metric("إجمالي النقرات 🎯", stats['clk'] or 0)
-    c4.metric("الأكواد الجاهزة", stats['stck'])
+# 5. الصفحة الرئيسية
+st.title("📊 لوحة تحكم MyClicker Pro (بايثون)")
+st.caption("مراقبة حية لضغط السيرفر وصيد الرحلات")
 
-    st.divider()
-    st.subheader("⚡ تفعيل الطوارئ الجماعي")
-    res_f = run_query("SELECT value FROM myapp.app_config WHERE key='global_free_mode'", fetch=True)
-    is_on = res_f[0]['value'] == 'true' if res_f else False
-    res_d = run_query("SELECT value FROM myapp.app_config WHERE key='global_free_days'", fetch=True)
-    curr_d = int(res_d[0]['value']) if res_d else 7
-    ca, cb = st.columns(2)
-    with ca:
-        st.write(f"**حالة النظام:** {'🟢 مفتوح للجميع' if is_on else '🔴 نظام الاشتراكات'}")
-        if st.button("تبديل وضع التفعيل الجماعي 🔄"):
-            run_query("INSERT INTO myapp.app_config (key, value) VALUES ('global_free_mode', %s) ON CONFLICT (key) DO UPDATE SET value=%s", ('false' if is_on else 'true', 'false' if is_on else 'true')); st.rerun()
-    with cb:
-        n_days = st.number_input("أيام المنحة التلقائية", 1, 999, curr_d)
-        if st.button("تحديث قيمة المنحة ⏳"):
-            run_query("INSERT INTO myapp.app_config (key, value) VALUES ('global_free_days', %s) ON CONFLICT (key) DO UPDATE SET value=%s", (str(n_days), str(n_days))); st.success("تم")
+# صف الكروت العلوية
+stats, top_df = fetch_stats()
+c1, c2, c3 = st.columns(3)
+c1.metric("إجمالي السائقين", f"{stats['total']} كابتن")
+c2.metric("إجمالي النقرات (صيد)", f"{int(stats['clicks'] or 0)} طلب")
+c3.metric("حالة السيرفر", "Online ✅")
 
-# ---------------------------------------------------------
-# 🔄 القسم 5: التحديثات الحية [الكلمات + د.أ + رموز العملة]
-# ---------------------------------------------------------
-elif menu == "🔄 التحديثات الحية":
-    st.header("🔄 لوحة التحكم الحية في ذكاء البوت")
-    st.info("أي تغيير هنا سيصل لآلاف الأجهزة فوراً دون الحاجة لتحديث التطبيق.")
+# الرسوم البيانية والجداول
+col_left, col_right = st.columns([2, 1])
+
+with col_left:
+    st.subheader("📈 نمو النقرات المباشر")
+    # إنشاء سجل تاريخي للنقرات في الذاكرة (للتمثيل البياني)
+    if 'history' not in st.session_state:
+        st.session_state.history = pd.DataFrame(columns=['time', 'clicks'])
     
-    # جلب الكلمات والمؤشرات (د.أ، دينار..)
-    res_k = run_query("SELECT value FROM myapp.app_config WHERE key='live_keywords'", fetch=True)
-    res_i = run_query("SELECT value FROM myapp.app_config WHERE key='live_indicators'", fetch=True)
+    new_data = pd.DataFrame({'time': [datetime.now()], 'clicks': [stats['clicks'] or 0]})
+    st.session_state.history = pd.concat([st.session_state.history, new_data]).tail(20)
     
-    curr_k = res_k[0]['value'] if res_k else "قبول,accept,موافق,استلام"
-    curr_i = res_i[0]['value'] if res_i else "د.أ,دينار,JOD,JD,mins,دقيقة"
+    fig = px.line(st.session_state.history, x='time', y='clicks', 
+                  color_discrete_sequence=['#38bdf8'], template="plotly_dark")
+    fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
+    st.plotly_chart(fig, use_container_width=True)
 
-    col_k, col_i = st.columns(2)
-    
-    with col_k:
-        st.subheader("🔘 كلمات النقر (Buttons)")
-        st.write("الكلمات التي يجب على البوت الضغط عليها:")
-        new_k = st.text_area("قائمة الكلمات (افصل بفاصلة ,)", value=curr_k, height=150)
-        if st.button("حقن كلمات النقر الآن 🚀"):
-            run_query("INSERT INTO myapp.app_config (key, value) VALUES ('live_keywords', %s) ON CONFLICT (key) DO UPDATE SET value=%s", (new_k, new_k))
-            st.success("✅ تم تحديث كلمات القبول")
+with col_right:
+    st.subheader("🏆 أقوى 10 صيادين")
+    st.dataframe(top_df, hide_index=True, use_container_width=True)
 
-    with col_i:
-        st.subheader("💰 رموز العملة والوقت (Indicators)")
-        st.write("الرموز التي تؤكد وجود طلب (مثل د.أ):")
-        new_i = st.text_area("قائمة الرموز (افصل بفاصلة ,)", value=curr_i, height=150)
-        if st.button("حقن رموز العملة والمؤشرات 💎"):
-            run_query("INSERT INTO myapp.app_config (key, value) VALUES ('live_indicators', %s) ON CONFLICT (key) DO UPDATE SET value=%s", (new_i, new_i))
-            st.success("✅ تم تحديث رموز العملة (د.أ)")
-
-    st.divider()
-    st.subheader("⚙️ إعدادات النظام الأخرى")
-    conf = pd.read_sql("SELECT key, value FROM myapp.app_config WHERE key NOT IN ('live_keywords', 'live_indicators')", get_db_connection())
-    edit_c = st.data_editor(conf, use_container_width=True)
-    if st.button("حفظ الإعدادات العامة 💾"):
-        for _, r in edit_c.iterrows(): run_query("UPDATE myapp.app_config SET value=%s WHERE key=%s", (r['value'], r['key']))
-        st.success("تم الحفظ")
-
-# ---------------------------------------------------------
-# 👥 القسم 2: إدارة الأجهزة (تعديل كامل + نقرات)
-# ---------------------------------------------------------
-elif menu == "👥 إدارة الأجهزة":
-    st.header("👥 التحكم في السائقين")
-    df_u = pd.read_sql("""SELECT device_id, phone, status, sub_tier, expiry_date, accepted_clicks, app_version,
-    CASE WHEN last_active > NOW() - INTERVAL '5 minutes' THEN 'Online 🟢' ELSE 'Offline 🔴' END as status_live FROM myapp.users_status ORDER BY last_active DESC""", get_db_connection())
-    st.dataframe(df_u, use_container_width=True)
-    target = st.selectbox("اختر الجهاز", df_u['device_id'])
-    t_row = df_u[df_u['device_id'] == target].iloc[0]
-    c1, c2 = st.columns(2)
-    with c1:
-        n_ph = st.text_input("تعديل الهاتف", t_row['phone'])
-        n_cl = st.number_input("تعديل النقرات", value=int(t_row['accepted_clicks']))
-        if st.button("حفظ التعديلات 💾"): run_query("UPDATE myapp.users_status SET phone=%s, accepted_clicks=%s WHERE device_id=%s", (n_ph, n_cl, target)); st.success("تم")
-    with c2:
-        if st.button("تحديث إجباري فردي ⚠️"): run_query("UPDATE myapp.users_status SET app_version='FORCE' WHERE device_id=%s", (target,)); st.warning("تم")
-        if st.button("حذف المستخدم 🧨"): run_query("DELETE FROM myapp.users_status WHERE device_id=%s", (target,)); st.rerun()
-
-# ---------------------------------------------------------
-# 📱 القسم 4: السوشال ميديا (Excel)
-# ---------------------------------------------------------
-elif menu == "📱 السوشال ميديا":
-    st.header("📱 رقابة الميديا (Interactive Excel)")
-    run_query("CREATE TABLE IF NOT EXISTS myapp.social_tracker (id SERIAL PRIMARY KEY, ref TEXT, platform TEXT, notes TEXT, status TEXT, date_added TIMESTAMP DEFAULT NOW())")
-    df_s = pd.read_sql("SELECT id, ref, platform, notes, status FROM myapp.social_tracker", get_db_connection())
-    edited = st.data_editor(df_s, num_rows="dynamic", use_container_width=True)
-    if st.button("مزامنة الإكسل 📊"):
-        run_query("DELETE FROM myapp.social_tracker")
-        for _, r in edited.iterrows(): run_query("INSERT INTO myapp.social_tracker (ref, platform, notes, status) VALUES (%s, %s, %s, %s)", (r['ref'], r['platform'], r['notes'], r['status']))
-        st.success("تمت المزامنة")
-
-# 🎫 نظام الأكواد
-elif menu == "🎫 نظام الأكواد":
-    st.header("🎫 إدارة الأكواد")
-    t1, t2 = st.tabs(["✨ توليد", "📜 سجل الاستخدام"])
-    with t1:
-        with st.form("g"):
-            pre = st.text_input("البادئة", "VIP"); dur = st.number_input("الأيام", 1, 365, 30); qty = st.number_input("العدد", 1, 500, 5)
-            if st.form_submit_button("توليد ✨"):
-                for _ in range(qty): c = f"{pre}-{dur}-{os.urandom(3).hex().upper()}"; run_query("INSERT INTO myapp.subscriptions (code, duration_days) VALUES (%s, %s)", (c, dur))
-                st.success("تم")
-        st.dataframe(pd.read_sql("SELECT code, duration_days FROM myapp.subscriptions WHERE is_used=FALSE ORDER BY id DESC", get_db_connection()), use_container_width=True)
-    with t2:
-        df_used = pd.read_sql("SELECT s.code, u.phone, s.used_at, s.used_by_device FROM myapp.subscriptions s JOIN myapp.users_status u ON s.used_by_device = u.device_id WHERE s.is_used = TRUE ORDER BY s.used_at DESC", get_db_connection())
-        st.dataframe(df_used, use_container_width=True)
-
-# 🔐 الصلاحيات، الرقابة، البث
-elif menu == "🔐 الصلاحيات":
-    st.header("🔐 إدارة فريق العمل")
-    with st.form("a"):
-        nu = st.text_input("المستخدم"); np = st.text_input("كلمة المرور", type="password"); nr = st.selectbox("الرتبة", ["مدير شريك", "مشرف", "دعم فني"])
-        ns = st.multiselect("الأقسام", ["📊 نظرة عامة", "👥 إدارة الأجهزة", "🎫 نظام الأكواد", "📱 السوشال ميديا", "🔄 التحديثات الحية", "📢 البث الجماعي"])
-        if st.form_submit_button("إضافة ✨"): run_query("INSERT INTO myapp.app_permissions (username, password, role_name, allowed_sections) VALUES (%s, %s, %s, %s)", (nu, hashlib.sha256(np.encode()).hexdigest(), nr, ns)); st.success("تم")
-
-elif menu == "🛡️ الأمن":
-    st.header("🛡️ سجل الرقابة")
-    st.table(pd.read_sql("SELECT * FROM myapp.security_logs ORDER BY created_at DESC LIMIT 100", get_db_connection()))
-
-elif menu == "📢 البث الجماعي":
-    st.header("📢 إرسال إشعار للجميع")
-    msg = st.text_area("نص الرسالة")
-    if st.button("بث الآن 🚀"): run_query("INSERT INTO myapp.app_config (key, value) VALUES ('global_notice', %s) ON CONFLICT (key) DO UPDATE SET value=%s", (msg, msg)); st.success("تم البث")
-
-st.sidebar.markdown("---")
-if st.sidebar.button("تسجيل الخروج 🚪"): st.session_state.auth = False; st.rerun()
+# 6. دورة التحديث والمحاكاة
+if sim_enabled:
+    run_simulation_step(sim_count)
+    time.sleep(1) # تحديث كل ثانية
+    st.rerun()
+else:
+    time.sleep(5) # تحديث هادئ كل 5 ثوانٍ
+    st.rerun()
