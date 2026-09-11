@@ -20,9 +20,8 @@ st.markdown("""
     div[data-testid="stMetricValue"] { color: #38bdf8; font-size: 2.5rem; font-weight: 900; }
     .stButton>button { background: linear-gradient(90deg, #2563EB 0%, #3B82F6 100%); border: none; border-radius: 15px; color: white; height: 3em; transition: all 0.3s; font-weight: 900; }
     .stButton>button:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(37,99,235,0.4); }
-    .sidebar .sidebar-content { background: #1E293B; }
     </style>
-    """, unsafe_allow_manager=True)
+    """, unsafe_allow_html=True) # تم تصحيح الكلمة هنا ✅
 
 # --- 2. محرك الاتصال الاستراتيجي بقاعدة البيانات ---
 DB_CONFIG = {
