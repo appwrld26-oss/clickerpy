@@ -2,98 +2,102 @@ import streamlit as st
 import psycopg2
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 import time
-import hashlib
-import random
-import numpy as np
-from datetime import datetime, timedelta
+from datetime import datetime
 
-# --- 1. التكوين الهندسي للهوية البصرية ---
-st.set_page_config(page_title="MyClicker Pro | Ultimate Command Center", layout="wide", page_icon="🧊")
+# 1. إعدادات الصفحة والهوية البصرية
+st.set_page_config(page_title="MyClicker Pro | Command Center", layout="wide", page_icon="🧊")
 
+# تصميم CSS مخصص لجعل اللوحة تبدو كالصورة التي أرسلتها (Dark Premium)
 st.markdown("""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;700;900&display=swap');
-    html, body, [class*="css"] { font-family: 'Cairo', sans-serif; background-color: #0F172A; color: white; }
-    .stMetric { background: linear-gradient(135deg, #1E293B 0%, #0F172A 100%); padding: 25px; border-radius: 20px; border: 1px solid #334155; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.4); }
-    div[data-testid="stMetricValue"] { color: #38bdf8 !size: 2.5rem !font-weight: 900; }
-    .stButton>button { background: linear-gradient(90deg, #2563EB 0%, #3B82F6 100%); border: none; border-radius: 15px; color: white; height: 3em; transition: all 0.3s; font-weight: 900; }
-    .stButton>button:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(37,99,235,0.4); }
+    .main { background-color: #0F172A; }
+    .stMetric { background-color: #1E293B; padding: 20px; border-radius: 15px; border: 1px solid #334155; }
+    div[data-testid="stMetricValue"] { color: #38bdf8; font-weight: 900; }
+    .css-1offfwp { background-image: linear-gradient(180deg, #1E293B 0%, #0F172A 100%); }
     </style>
-    """, unsafe_allow_html=True)
+    """, unsafe_allow_manager=True)
 
-# --- 2. محرك الاتصال بقاعدة البيانات ---
-DB_DSN = "postgresql://doadmin:1tHwqXCgn8BS6iTm942V3f7a@myclicker-db-rd7ky.db1.ondigitalocean.com:25060/mypool?sslmode=require"
+# 2. الاتصال بقاعدة بيانات DigitalOcean
+DB_URL = "postgresql://doadmin:1tHwqXCgn8BS6iTm942V3f7a@myclicker-db-rd7ky.db1.ondigitalocean.com:25060/mypool?sslmode=require"
 
-def execute_query(query, params=None, fetch=True):
-    with psycopg2.connect(DB_DSN) as conn:
-        with conn.cursor() as cur:
-            cur.execute(query, params)
-            if fetch:
-                data = cur.fetchall()
-                cols = [desc[0] for desc in cur.description]
-                return pd.DataFrame(data, columns=cols)
-            conn.commit()
+def get_db_connection():
+    return psycopg2.connect(DB_URL)
 
-# --- 3. القائمة الجانبية ---
-st.sidebar.markdown("<h1 style='text-align: center; color: #38bdf8;'>MYCLICKER PRO</h1>", unsafe_allow_html=True)
-st.sidebar.markdown("---")
-nav = st.sidebar.radio("📋 القائمة الرئيسية", 
-    ["📊 التحليل الثلاثي الأبعاد", "👥 إدارة أسطول الكباتن", "⚙️ ذكاء البوت الحي", "🎫 مصنع الأكواد", "🚀 محرك المحاكاة"])
+# 3. محرك المحاكاة والبيانات
+def fetch_stats():
+    conn = get_db_connection()
+    df = pd.read_sql("SELECT count(*) as total, sum(accepted_clicks) as clicks FROM myapp.users_status", conn)
+    top_users = pd.read_sql("SELECT phone, accepted_clicks, bot_status FROM myapp.users_status ORDER BY accepted_clicks DESC LIMIT 10", conn)
+    conn.close()
+    return df.iloc[0], top_users
 
-# --- 4. التحليل ثلاثي الأبعاد ---
-if nav == "📊 التحليل الثلاثي الأبعاد":
-    st.title("🌌 التحليل الفضائي للنشاط (3D View)")
-    df_3d = execute_query("SELECT device_id, accepted_clicks, last_active FROM myapp.users_status")
+def run_simulation_step(count):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    # محاكاة صيد عشوائي لـ 5% من الأجهزة الافتراضية
+    cur.execute("""
+        UPDATE myapp.users_status 
+        SET accepted_clicks = accepted_clicks + 1, last_active = NOW()
+        WHERE device_id IN (
+            SELECT device_id FROM myapp.users_status 
+            WHERE device_id LIKE 'test_device_%' 
+            ORDER BY RANDOM() LIMIT %s
+        )
+    """, (max(1, int(count * 0.05)),))
+    conn.commit()
+    cur.close()
+    conn.close()
+
+# 4. واجهة المستخدم (Sidebar)
+st.sidebar.title("🎮 مركز التحكم بالمحاكاة")
+sim_enabled = st.sidebar.toggle("تفعيل جيش المحاكاة 🚀", value=False)
+sim_count = st.sidebar.slider("عدد الأجهزة الافتراضية", 100, 1000, 500)
+
+if st.sidebar.button("🧹 تصفير كافة النقرات"):
+    conn = get_db_connection()
+    conn.cursor().execute("UPDATE myapp.users_status SET accepted_clicks = 0")
+    conn.commit()
+    conn.close()
+    st.sidebar.success("تم التصفير بنجاح")
+
+# 5. الصفحة الرئيسية
+st.title("📊 لوحة تحكم MyClicker Pro (بايثون)")
+st.caption("مراقبة حية لضغط السيرفر وصيد الرحلات")
+
+# صف الكروت العلوية
+stats, top_df = fetch_stats()
+c1, c2, c3 = st.columns(3)
+c1.metric("إجمالي السائقين", f"{stats['total']} كابتن")
+c2.metric("إجمالي النقرات (صيد)", f"{int(stats['clicks'] or 0)} طلب")
+c3.metric("حالة السيرفر", "Online ✅")
+
+# الرسوم البيانية والجداول
+col_left, col_right = st.columns([2, 1])
+
+with col_left:
+    st.subheader("📈 نمو النقرات المباشر")
+    # إنشاء سجل تاريخي للنقرات في الذاكرة (للتمثيل البياني)
+    if 'history' not in st.session_state:
+        st.session_state.history = pd.DataFrame(columns=['time', 'clicks'])
     
-    if not df_3d.empty:
-        df_3d['time_score'] = pd.to_datetime(df_3d['last_active']).astype(np.int64) // 10**9
-        df_3d['idx'] = range(len(df_3d))
-        
-        fig = go.Figure(data=[go.Scatter3d(
-            x=df_3d['idx'], y=df_3d['time_score'], z=df_3d['accepted_clicks'],
-            mode='markers', marker=dict(size=8, color=df_3d['accepted_clicks'], colorscale='Viridis', opacity=0.8)
-        )])
-        fig.update_layout(template="plotly_dark", margin=dict(l=0, r=0, b=0, t=0))
-        st.plotly_chart(fig, use_container_width=True)
-        
-        c1, c2, c3 = st.columns(3)
-        c1.metric("إجمالي النقرات", int(df_3d['accepted_clicks'].sum()))
-        c2.metric("أقوى صياد", int(df_3d['accepted_clicks'].max()))
-        c3.metric("عدد الأجهزة", len(df_3d))
+    new_data = pd.DataFrame({'time': [datetime.now()], 'clicks': [stats['clicks'] or 0]})
+    st.session_state.history = pd.concat([st.session_state.history, new_data]).tail(20)
+    
+    fig = px.line(st.session_state.history, x='time', y='clicks', 
+                  color_discrete_sequence=['#38bdf8'], template="plotly_dark")
+    fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
+    st.plotly_chart(fig, use_container_width=True)
 
-# --- 5. إدارة الكباتن (Fleet Control) ---
-elif nav == "👥 إدارة أسطول الكباتن":
-    st.title("👥 مركز التحكم في السائقين")
-    global_msg = st.text_input("📢 بث إشعار عام لكافة الأجهزة")
-    if st.button("🚀 بث فوري"):
-        execute_query("UPDATE myapp.users_status SET notice_message = %s", (global_msg,), False)
-        st.toast("تم البث بنجاح")
+with col_right:
+    st.subheader("🏆 أقوى 10 صيادين")
+    st.dataframe(top_df, hide_index=True, use_container_width=True)
 
-    captains = execute_query("SELECT * FROM myapp.users_status ORDER BY last_active DESC LIMIT 50")
-    for _, cap in captains.iterrows():
-        with st.expander(f"📱 {cap['phone'] or 'جديد'} | النقرات: {cap['accepted_clicks']}"):
-            c1, c2 = st.columns(2)
-            if c1.button("❄️ تجميد الحساب", key=f"f_{cap['device_id']}"):
-                execute_query("UPDATE myapp.users_status SET is_frozen = NOT is_frozen WHERE device_id = %s", (cap['device_id'],), False)
-                st.rerun()
-            notice = c2.text_input("رسالة خاصة", key=f"n_{cap['device_id']}")
-            if c2.button("📢 إرسال", key=f"s_{cap['device_id']}"):
-                execute_query("UPDATE myapp.users_status SET notice_message = %s WHERE device_id = %s", (notice, cap['device_id']), False)
-
-# --- باقي الأقسام مدمجة داخلياً لضمان عدم التعطل ---
-elif nav == "⚙️ ذكاء البوت الحي":
-    st.title("⚙️ برمجة ذكاء البوت")
-    kw = st.text_area("الكلمات المفتاحية")
-    if st.button("💾 حفظ"):
-        execute_query("INSERT INTO myapp.app_config (key, value) VALUES ('live_keywords', %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", (kw,), False)
-        st.toast("تم التحديث")
-
-elif nav == Nav == "🎫 مصنع الأكواد" or nav == "🚀 محرك المحاكاة":
-    st.title(nav)
-    st.write("القسم يعمل بكفاءة في الخلفية...")
-
-# تحديث تلقائي بسيط
-time.sleep(10)
-st.rerun()
+# 6. دورة التحديث والمحاكاة
+if sim_enabled:
+    run_simulation_step(sim_count)
+    time.sleep(1) # تحديث كل ثانية
+    st.rerun()
+else:
+    time.sleep(5) # تحديث هادئ كل 5 ثوانٍ
+    st.rerun()
