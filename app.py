@@ -1,265 +1,640 @@
-"""
-إضافة سجل نشاط المشرفين إلى تطبيق MyClicker Pro في Streamlit
-
-طريقة الاستخدام:
-1) الصق هذا الكود بعد دوال run_query وsection_title وrender_table في ملفك الرئيسي.
-2) استدعِ ensure_audit_table() مرة واحدة بعد تسجيل الدخول.
-3) أضف render_audit_log_page() داخل شرط القائمة الجانبية.
-4) بعد كل عملية تعديل، استدعِ log_admin_action(...).
-
-الكود يستخدم دالة run_query الموجودة أصلاً في تطبيقك، لذلك لا يغيّر رابط اتصال قاعدة البيانات.
-"""
-
+import hashlib
+import time
+from contextlib import contextmanager
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Iterable, Optional
 
+import numpy as np
 import pandas as pd
+import plotly.express as px
+import psycopg2
 import streamlit as st
+from psycopg2 import pool
 
 
-AUDIT_ACTION_LABELS = {
-    "update": "تعديل بيانات",
-    "reset": "تصفير النقرات",
-    "freeze": "تغيير التجميد",
-    "delete": "حذف جهاز",
-    "login": "تسجيل دخول",
-    "logout": "تسجيل خروج",
-    "settings": "تغيير الإعدادات",
-}
+# ============================================================
+# 1. إعداد الصفحة والهوية البصرية
+# ============================================================
+st.set_page_config(
+    page_title="MyClicker Pro | Ultimate Command",
+    page_icon="⚡",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+st.markdown(
+    """
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&display=swap');
+
+    :root {
+        --bg: #0b1120;
+        --panel: #111c32;
+        --panel-soft: #16233d;
+        --line: #263957;
+        --cyan: #00e5ff;
+        --blue: #4285ff;
+        --green: #35e0a1;
+        --orange: #ffb454;
+        --red: #ff5c7a;
+        --text-soft: #a9b8d0;
+        --text: #f4f7fb;
+        --muted: #8fa2bf;
+        --radius-lg: 22px;
+        --radius-md: 14px;
+    }
+
+    html, body, [class*="css"], .stMarkdown, .stTextInput,
+    .stTextArea, .stSelectbox, .stNumberInput, .stRadio,
+    .stButton, .stDataFrame, .stDataEditor {
+        font-family: 'Cairo', sans-serif;
+        direction: rtl;
+        text-align: right;
+        background: var(--bg);
+        color: var(--text);
+    }
+
+    h1, h2, h3, h4, h5, h6 {
+        color: var(--text) !important;
+        font-weight: 900 !important;
+        letter-spacing: -.02em;
+    }
+
+    p, label, .stCaption, [data-testid="stMarkdownContainer"] {
+        line-height: 1.85;
+    }
+
+    .stCaption, [data-testid="stCaptionContainer"] {
+        color: var(--muted) !important;
+        font-size: .9rem;
+    }
+
+    [data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #0e1930 0%, #0a1222 100%);
+        border-left: 1px solid var(--line);
+    }
+
+    .hero {
+        position: relative;
+        overflow: hidden;
+        margin: 0 0 1.5rem;
+        padding: 2rem 2.25rem;
+        border: 1px solid rgba(0,229,255,.25);
+        border-radius: var(--radius-lg);
+        background:
+            radial-gradient(circle at 10% 10%, rgba(0,229,255,.18), transparent 32%),
+            radial-gradient(circle at 90% 90%, rgba(66,133,255,.18), transparent 35%),
+            linear-gradient(135deg, #13223d, #0d172b);
+        box-shadow: 0 18px 55px rgba(0,0,0,.22);
+    }
+
+    .hero h1 { margin: 0; color: #fff; font-size: clamp(1.55rem, 3vw, 2.2rem); font-weight: 900; }
+    .hero p { margin: .45rem 0 0; color: var(--text-soft); font-size: 1rem; }
+
+    .logo-container { text-align: center; padding: 1rem 0 0.5rem; }
+    .neon-circle {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 92px;
+        height: 92px;
+        margin: auto;
+        border-radius: 50%;
+        font-size: 38px;
+        background: radial-gradient(circle, #00e5ff 0%, #007bff 100%);
+        box-shadow: 0 0 20px #00e5ff, 0 0 48px rgba(0,123,255,.8);
+        animation: pulse 2.4s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+        0%, 100% { transform: scale(1); filter: brightness(1); }
+        50% { transform: scale(1.08); filter: brightness(1.2); }
+    }
+
+    .stMetric {
+        padding: 1.1rem 1.25rem;
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        background: linear-gradient(135deg, var(--panel-soft), var(--panel));
+        box-shadow: 0 8px 25px rgba(0,0,0,.12);
+    }
+
+    [data-testid="stMetricLabel"] {
+        color: var(--muted) !important;
+        font-size: .9rem !important;
+        font-weight: 700 !important;
+    }
+
+    [data-testid="stMetricValue"] {
+        color: var(--cyan) !important;
+        font-size: 1.65rem !important;
+        font-weight: 900 !important;
+    }
+
+    .stButton > button {
+        width: 100%;
+        min-height: 2.8rem;
+        border-radius: 12px;
+        border: 1px solid rgba(0,229,255,.25);
+        font-weight: 800;
+        transition: all .2s ease;
+    }
+
+    .stButton > button:hover {
+        transform: translateY(-2px);
+        border-color: var(--cyan);
+        box-shadow: 0 8px 22px rgba(0,229,255,.18);
+    }
+
+    div[data-testid="stExpander"] {
+        margin-bottom: .7rem;
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        background: var(--panel);
+    }
+
+    div[data-testid="stExpander"] summary p {
+        color: var(--text) !important;
+        font-weight: 800;
+    }
+
+    [data-testid="stDataFrame"], [data-testid="stDataEditor"] {
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-md);
+        background: var(--panel);
+        box-shadow: 0 10px 30px rgba(0,0,0,.14);
+    }
+
+    [data-testid="stDataFrame"] iframe,
+    [data-testid="stDataEditor"] iframe {
+        border-radius: var(--radius-md);
+    }
+
+    [data-testid="stDataFrame"] [role="columnheader"],
+    [data-testid="stDataEditor"] [role="columnheader"] {
+        background: #1b2c4a !important;
+        color: #bfefff !important;
+        font-weight: 900 !important;
+    }
+
+    [data-testid="stDataFrame"] [role="gridcell"],
+    [data-testid="stDataEditor"] [role="gridcell"] {
+        color: #e7eef8 !important;
+        border-color: #263957 !important;
+        font-size: .92rem !important;
+    }
+
+    [data-testid="stDataFrame"] [role="row"]:nth-child(even),
+    [data-testid="stDataEditor"] [role="row"]:nth-child(even) {
+        background: rgba(22,35,61,.62) !important;
+    }
+
+    [data-testid="stDataFrame"] [role="row"]:hover,
+    [data-testid="stDataEditor"] [role="row"]:hover {
+        background: rgba(0,229,255,.08) !important;
+    }
+
+    .section-title {
+        display: flex;
+        align-items: center;
+        gap: .65rem;
+        margin: 1.3rem 0 .55rem;
+        padding-bottom: .45rem;
+        border-bottom: 1px solid var(--line);
+        color: var(--text);
+        font-size: 1.15rem;
+        font-weight: 900;
+    }
+
+    .section-caption {
+        color: var(--text-soft);
+        margin-top: -0.7rem;
+        margin-bottom: 1rem;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 
-def ensure_audit_table() -> bool:
-    """إنشاء جدول السجل والفهارس إذا لم تكن موجودة."""
-    result = run_query(
-        """
-        CREATE TABLE IF NOT EXISTS myapp.admin_audit_log (
-            id BIGSERIAL PRIMARY KEY,
-            actor_open_id VARCHAR(128) NOT NULL,
-            actor_name VARCHAR(320) NOT NULL,
-            actor_role VARCHAR(32) NOT NULL DEFAULT 'admin',
-            action VARCHAR(64) NOT NULL,
-            device_id VARCHAR(255),
-            details TEXT,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+# ============================================================
+# 2. قاعدة البيانات: pool واحد، معاملات آمنة، وتنظيف مضمون
+# ============================================================
+DB_URL = "postgresql://neondb_owner:npg_AvzFkHQ6M3yo@ep-tiny-wind-ayd9hww0.c-5.us-east-2.aws.neon.tech/neondb?sslmode=require"
+
+
+@st.cache_resource(show_spinner=False)
+def get_pool() -> pool.SimpleConnectionPool:
+    """Create one shared connection pool for the Streamlit process."""
+    return pool.SimpleConnectionPool(
+        minconn=1,
+        maxconn=20,
+        dsn=DB_URL,
+        sslmode="require",
+        sslrootcert="",
+    )
+
+
+@contextmanager
+def db_connection():
+    """Borrow a connection and always return it to the pool."""
+    connection = None
+    database_pool = get_pool()
+    try:
+        connection = database_pool.getconn()
+        yield connection
+    finally:
+        if connection is not None:
+            database_pool.putconn(connection)
+
+
+def run_query(
+    query: str,
+    params: Optional[Iterable[Any]] = None,
+    is_select: bool = True,
+) -> Optional[pd.DataFrame | bool]:
+    """Run a parameterized query and return a DataFrame or success flag."""
+    try:
+        with db_connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(query, tuple(params or ()))
+                if is_select:
+                    rows = cursor.fetchall()
+                    columns = [column[0] for column in cursor.description]
+                    return pd.DataFrame(rows, columns=columns)
+                connection.commit()
+                return True
+    except Exception as error:
+        st.error(f"❌ تعذر تنفيذ العملية: {error}")
+        return None
+
+
+def fetch_config() -> dict[str, str]:
+    config = run_query("SELECT key, value FROM myapp.app_config")
+    if config is None or config.empty:
+        return {}
+    return dict(zip(config["key"].astype(str), config["value"].astype(str)))
+
+
+def save_config(values: dict[str, Any]) -> bool:
+    for key, value in values.items():
+        result = run_query(
+            """
+            INSERT INTO myapp.app_config (key, value)
+            VALUES (%s, %s)
+            ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+            """,
+            (key, str(value)),
+            is_select=False,
         )
-        """,
-        is_select=False,
-    )
-    if result is None:
-        return False
-
-    run_query(
-        """
-        CREATE INDEX IF NOT EXISTS admin_audit_log_created_at_idx
-        ON myapp.admin_audit_log (created_at DESC)
-        """,
-        is_select=False,
-    )
-    run_query(
-        """
-        CREATE INDEX IF NOT EXISTS admin_audit_log_action_idx
-        ON myapp.admin_audit_log (action)
-        """,
-        is_select=False,
-    )
+        if result is None:
+            return False
     return True
 
 
-def _current_actor() -> dict[str, str]:
-    """الحصول على بيانات المستخدم الحالي من session_state."""
-    user = st.session_state.get("user", {}) or {}
-    return {
-        "open_id": str(user.get("openId") or user.get("open_id") or "streamlit-admin"),
-        "name": str(user.get("name") or st.session_state.get("username") or "admin"),
-        "role": str(user.get("role") or "admin"),
-    }
+# ============================================================
+# 3. جلسة المستخدم والمكونات المشتركة
+# ============================================================
+if "auth" not in st.session_state:
+    st.session_state.auth = False
 
-
-def log_admin_action(
-    action: str,
-    *,
-    device_id: Optional[str] = None,
-    details: Optional[str] = None,
-    actor: Optional[dict[str, str]] = None,
-) -> bool:
-    """تسجيل عملية مشرف واحدة بعد نجاح العملية الأصلية."""
-    current = actor or _current_actor()
-    if current.get("role") not in {"admin", "supervisor", "مشرف"}:
-        return False
-
-    return (
-        run_query(
+if not st.session_state.auth:
+    left, center, right = st.columns([1, 1.15, 1])
+    with center:
+        st.markdown(
             """
-            INSERT INTO myapp.admin_audit_log
-                (actor_open_id, actor_name, actor_role, action, device_id, details)
-            VALUES (%s, %s, %s, %s, %s, %s)
+            <div class="hero" style="text-align:center;">
+                <div class="neon-circle" style="width:74px;height:74px;font-size:30px;">⚡</div>
+                <h1 style="font-size:1.8rem;margin-top:1rem;">MYCLICKER PRO</h1>
+                <p>بوابة القيادة والتحكم الذكية</p>
+            </div>
             """,
-            (
-                current["open_id"],
-                current["name"],
-                current["role"],
-                action,
-                device_id,
-                details,
-            ),
-            is_select=False,
+            unsafe_allow_html=True,
         )
-        is not None
+        username = st.text_input("👤 اسم المستخدم")
+        password = st.text_input("🔑 كلمة السر", type="password")
+        if st.button("دخول إلى غرفة القيادة 🚀", type="primary"):
+            if username == "admin" and password == "admin123":
+                st.session_state.auth = True
+                st.rerun()
+            st.error("بيانات الدخول غير صحيحة")
+    st.stop()
+
+
+MENU_ITEMS = [
+    "📈 نظرة عامة وإحصائيات الإصدارات",
+    "👥 إدارة ومراقبة المستخدمين والتفعيل",
+    "📢 مركز الإشعارات الشامل الكامل",
+    "🚀 إدارة التحديثات الإجبارية",
+    "⚡ تحديث البيانات الحية (LIVE UPDATE)",
+    "💳 توليد وإدارة الأكواد",
+    "🤝 قسم الشركاء (الموزعين)",
+    "📊 تحليل البيانات 3D",
+    "🖥️ حالة السيرفر",
+    "🔐 إدارة الصلاحيات والتحكم",
+    "🛠️ الدعم الفني والتواصل",
+    "🤖 إضافة الأجهزة الافتراضية (TEST)",
+]
+
+with st.sidebar:
+    st.markdown("<div class='logo-container'><div class='neon-circle'>⚡</div></div>", unsafe_allow_html=True)
+    st.markdown("<h3 style='text-align:center;color:#00E5FF;'>MyClicker Pro</h3>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align:center;color:#a9b8d0;'>المستخدم: admin</p>", unsafe_allow_html=True)
+    if st.button("🔄 مسح الذاكرة والتحديث"):
+        st.cache_data.clear()
+        st.rerun()
+    st.divider()
+    menu = st.radio("القائمة الرئيسية", MENU_ITEMS)
+    st.divider()
+    if st.button("🚪 تسجيل الخروج"):
+        st.session_state.auth = False
+        st.rerun()
+
+
+def page_header(title: str, subtitle: str) -> None:
+    st.markdown(
+        f"<div class='hero'><h1>{title}</h1><p>{subtitle}</p></div>",
+        unsafe_allow_html=True,
     )
 
 
-def fetch_audit_logs(
-    search: str = "",
-    action: str = "all",
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    limit: int = 250,
-) -> pd.DataFrame:
-    """جلب سجل النشاط بفلاتر آمنة ومعاملات SQL."""
-    query = """
-        SELECT
-            id,
-            actor_name,
-            actor_role,
-            action,
-            device_id,
-            details,
-            created_at
-        FROM myapp.admin_audit_log
-        WHERE (%s = '' OR actor_name ILIKE '%%' || %s || '%%'
-               OR device_id ILIKE '%%' || %s || '%%'
-               OR details ILIKE '%%' || %s || '%%')
-          AND (%s = 'all' OR action = %s)
-          AND (%s IS NULL OR created_at::date >= %s::date)
-          AND (%s IS NULL OR created_at::date <= %s::date)
-        ORDER BY created_at DESC
-        LIMIT %s
+def section_title(title: str) -> None:
+    """Render a consistent section heading across all dashboard pages."""
+    st.markdown(f"<div class='section-title'>{title}</div>", unsafe_allow_html=True)
+
+
+def render_table(frame: pd.DataFrame, *, height: int = 320) -> None:
+    """Render a clean, compact, right-to-left data table."""
+    st.dataframe(
+        frame,
+        use_container_width=True,
+        hide_index=True,
+        height=height,
+    )
+
+
+# ============================================================
+# 4. صفحات لوحة التحكم
+# ============================================================
+if menu.startswith("📈"):
+    page_header("📈 مركز الرؤية والتحليلات", "لقطة فورية لأداء الأسطول وإصدارات التطبيق.")
+    summary = run_query(
+        """
+        SELECT COUNT(*) AS total,
+               COALESCE(SUM(accepted_clicks), 0) AS clicks,
+               COUNT(*) FILTER (WHERE is_frozen = TRUE) AS frozen
+        FROM myapp.users_status
+        """
+    )
+    if summary is not None and not summary.empty:
+        stats = summary.iloc[0]
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("إجمالي الأجهزة", f"{int(stats['total']):,}")
+        c2.metric("إجمالي النقرات", f"{int(stats['clicks']):,}")
+        c3.metric("الأجهزة المجمدة", f"{int(stats['frozen']):,}")
+        c4.metric("حالة الاتصال", "مستقر ✅")
+
+    versions = run_query(
+        """
+        SELECT COALESCE(app_version, 'غير معروف') AS app_version, COUNT(*) AS devices
+        FROM myapp.users_status
+        GROUP BY app_version
+        ORDER BY devices DESC
+        """
+    )
+    if versions is not None and not versions.empty:
+        section_title("📊 خريطة انتشار الإصدارات")
+        chart = px.bar(
+            versions,
+            x="app_version",
+            y="devices",
+            color="devices",
+            template="plotly_dark",
+            labels={"app_version": "الإصدار", "devices": "عدد الأجهزة"},
+            color_continuous_scale="blues",
+        )
+        st.plotly_chart(chart, use_container_width=True)
+    time.sleep(10)
+    st.rerun()
+
+elif menu.startswith("👥"):
+    page_header("👥 إدارة أسطول الكباتن", "جدول شامل بأسلوب Excel لمراقبة المستخدمين وحالة البوت لحظياً.")
+    search = st.text_input("🔍 ابحث برقم الهاتف أو معرّف الجهاز")
+    base_query = """
+        SELECT users_status.*,
+               CASE
+                   WHEN last_active >= NOW() - INTERVAL '5 minutes'
+                   THEN '🟢 Online'
+                   ELSE '🔴 Offline'
+               END AS bot_connection,
+               CASE
+                   WHEN last_active >= NOW() - INTERVAL '5 minutes'
+                   THEN TRUE
+                   ELSE FALSE
+               END AS bot_online
+        FROM myapp.users_status
+        WHERE device_id NOT LIKE 'sim_%%'
     """
-    params = (
-        search.strip(),
-        search.strip(),
-        search.strip(),
-        search.strip(),
-        action,
-        action,
-        start_date,
-        start_date,
-        end_date,
-        end_date,
-        int(limit),
-    )
-    result = run_query(query, params)
-    if result is None:
-        return pd.DataFrame()
-    return result
+    params: list[str] = []
+    if search.strip():
+        base_query += " AND (phone ILIKE %s OR device_id ILIKE %s)"
+        pattern = f"%{search.strip()}%"
+        params.extend([pattern, pattern])
+    base_query += " ORDER BY last_active DESC NULLS LAST LIMIT 100"
+    users = run_query(base_query, params)
 
-
-def render_audit_log_page() -> None:
-    """عرض صفحة سجل نشاط المشرفين داخل Streamlit."""
-    ensure_audit_table()
-
-    page_header(
-        "🧾 سجل نشاط المشرفين",
-        "تتبع جميع التعديلات والعمليات التي تمت داخل لوحة التحكم.",
-    )
-
-    current = _current_actor()
-    if current.get("role") not in {"admin", "supervisor", "مشرف", "monitor", "مراقب"}:
-        st.error("ليس لديك صلاحية مشاهدة سجل النشاط.")
-        st.stop()
-
-    filter_col1, filter_col2, filter_col3, filter_col4 = st.columns([1.5, 1, 1, 1])
-    with filter_col1:
-        search = st.text_input(
-            "🔍 بحث",
-            placeholder="اسم المشرف أو الجهاز أو التفاصيل",
-        )
-    with filter_col2:
-        action_options = ["all", *AUDIT_ACTION_LABELS.keys()]
-        action = st.selectbox(
-            "نوع العملية",
-            options=action_options,
-            format_func=lambda value: "كل العمليات" if value == "all" else AUDIT_ACTION_LABELS[value],
-        )
-    with filter_col3:
-        start_date = st.date_input("من تاريخ", value=None)
-    with filter_col4:
-        end_date = st.date_input("إلى تاريخ", value=None)
-
-    start_value = start_date.isoformat() if start_date else None
-    end_value = end_date.isoformat() if end_date else None
-    logs = fetch_audit_logs(
-        search=search,
-        action=action,
-        start_date=start_value,
-        end_date=end_value,
-    )
-
-    if not logs.empty:
-        logs["نوع العملية"] = logs["action"].map(AUDIT_ACTION_LABELS).fillna(logs["action"])
-        logs["وقت العملية"] = pd.to_datetime(logs["created_at"], errors="coerce").dt.strftime("%Y-%m-%d %H:%M:%S")
-        logs["الدور"] = logs["actor_role"].replace({"admin": "مشرف", "monitor": "مراقب"})
-        logs = logs.rename(
-            columns={
-                "actor_name": "اسم المستخدم",
-                "device_id": "معرّف الجهاز",
-                "details": "التفاصيل",
-            }
-        )
-        display_columns = [
-            "وقت العملية",
-            "اسم المستخدم",
-            "الدور",
-            "نوع العملية",
-            "معرّف الجهاز",
-            "التفاصيل",
-        ]
+    if users is None or users.empty:
+        st.info("لا توجد أجهزة مطابقة للبحث.")
     else:
-        display_columns = []
+        section_title("📋 جدول المستخدمين — عرض Excel")
+        st.caption("🟢 Online = نشاط خلال آخر 5 دقائق  |  🔴 Offline = لا يوجد نشاط حديث")
 
-    metric_col1, metric_col2, metric_col3 = st.columns(3)
-    metric_col1.metric("إجمالي العمليات", f"{len(logs):,}")
-    metric_col2.metric("عمليات التعديل", f"{int((logs.get('action', pd.Series(dtype=str)) == 'update').sum()):,}")
-    metric_col3.metric("عمليات الحذف", f"{int((logs.get('action', pd.Series(dtype=str)) == 'delete').sum()):,}")
+        # ترتيب الأعمدة المهمة أولاً مع إبقاء جميع معلومات قاعدة البيانات ظاهرة.
+        priority_columns = [
+            "bot_connection", "phone", "device_id", "accepted_clicks",
+            "app_version", "status", "sub_tier", "last_active",
+            "expiry_date", "is_frozen", "notice_message",
+        ]
+        visible_columns = [column for column in priority_columns if column in users.columns]
+        visible_columns += [column for column in users.columns if column not in visible_columns and column != "bot_online"]
+        excel_view = users[visible_columns].copy()
+        excel_view = excel_view.rename(columns={
+            "bot_connection": "حالة البوت",
+            "phone": "رقم الهاتف",
+            "device_id": "معرّف الجهاز",
+            "accepted_clicks": "عدد النقرات",
+            "app_version": "رقم الإصدار",
+            "status": "الحالة العامة",
+            "sub_tier": "الفئة",
+            "last_active": "آخر نشاط",
+            "expiry_date": "تاريخ الانتهاء",
+            "is_frozen": "مجمد؟",
+            "notice_message": "رسالة التنبيه",
+        })
+        render_table(excel_view, height=480)
 
-    section_title("📋 تفاصيل سجل النشاط")
-    if logs.empty:
-        st.info("لا توجد عمليات مسجلة ضمن الفلاتر الحالية.")
-        return
+        st.download_button(
+            "📥 تنزيل بيانات المستخدمين CSV",
+            data=excel_view.to_csv(index=False).encode("utf-8-sig"),
+            file_name=f"myclicker_users_{datetime.now():%Y%m%d_%H%M}.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
 
-    render_table(logs[display_columns], height=520)
+        section_title("🛠️ أدوات التحكم السريع")
+        for _, user in users.iterrows():
+            device_id = str(user.get("device_id", ""))
+            phone = str(user.get("phone", ""))
+            clicks = int(user.get("accepted_clicks") or 0)
+            frozen = bool(user.get("is_frozen", False))
+            connection = str(user.get("bot_connection", "🔴 Offline"))
+            version = str(user.get("app_version", "غير معروف"))
+            with st.expander(f"{connection}  |  📱 {phone}  |  🎯 {clicks:,} نقرة  |  الإصدار {version}"):
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    new_phone = st.text_input("تعديل الهاتف", value=phone, key=f"phone_{device_id}")
+                    tiers = ["VIP", "STANDARD", "TRIAL"]
+                    current_tier = str(user.get("sub_tier") or "STANDARD")
+                    tier_index = tiers.index(current_tier) if current_tier in tiers else 1
+                    new_tier = st.selectbox("الفئة", tiers, index=tier_index, key=f"tier_{device_id}")
+                    if st.button("💾 حفظ التعديلات", key=f"save_{device_id}"):
+                        run_query(
+                            "UPDATE myapp.users_status SET phone=%s, sub_tier=%s WHERE device_id=%s",
+                            (new_phone, new_tier, device_id),
+                            is_select=False,
+                        )
+                        st.toast("تم تحديث بيانات الجهاز")
+                        st.rerun()
+                with col2:
+                    st.write("**تحكم العداد**")
+                    if st.button("🔄 تصفير النقرات", key=f"reset_{device_id}"):
+                        run_query(
+                            "UPDATE myapp.users_status SET accepted_clicks=0 WHERE device_id=%s",
+                            (device_id,),
+                            is_select=False,
+                        )
+                        st.toast("تم تصفير العداد")
+                        st.rerun()
+                with col3:
+                    st.write("**منطقة الخطر**")
+                    if st.button("🗑️ حذف الجهاز نهائياً", key=f"delete_{device_id}", type="primary"):
+                        run_query(
+                            "DELETE FROM myapp.users_status WHERE device_id=%s",
+                            (device_id,),
+                            is_select=False,
+                        )
+                        st.toast("تم حذف الجهاز")
+                        st.rerun()
+                with col4:
+                    st.write(f"**الحالة:** {'مجمد' if frozen else 'نشط'}")
+                    if st.button("❄️ تجميد / فك التجميد", key=f"freeze_{device_id}"):
+                        run_query(
+                            "UPDATE myapp.users_status SET is_frozen = NOT COALESCE(is_frozen, FALSE) WHERE device_id=%s",
+                            (device_id,),
+                            is_select=False,
+                        )
+                        st.toast("تم تغيير حالة الجهاز")
+                        st.rerun()
 
-    export_frame = logs[display_columns].copy()
-    csv_data = export_frame.to_csv(index=False).encode("utf-8-sig")
-    st.download_button(
-        "⬇️ تصدير سجل النشاط CSV",
-        data=csv_data,
-        file_name=f"myclicker-audit-log-{datetime.now():%Y-%m-%d}.csv",
-        mime="text/csv",
+elif menu.startswith("📢"):
+    page_header("📢 مركز الإشعارات", "أرسل رسالة موحّدة إلى شريط إشعارات التطبيق.")
+    message = st.text_area("نص الرسالة", height=140, placeholder="اكتب الإعلان أو التنبيه هنا...")
+    if st.button("🚀 بث فوري للجميع", type="primary"):
+        if message.strip():
+            run_query("UPDATE myapp.users_status SET notice_message = %s", (message.strip(),), is_select=False)
+            st.success("تم بث الرسالة بنجاح")
+        else:
+            st.warning("اكتب رسالة قبل الإرسال")
+
+elif menu.startswith("🚀"):
+    page_header("🚀 التحديث الإجباري", "تحكم في النسخة المطلوبة ورابط حزمة التحديث.")
+    config = fetch_config()
+    with st.form("forced_update_form"):
+        version = st.text_input("أحدث نسخة", value=config.get("latest_version", "7.2.8"))
+        force_update = st.checkbox("تفعيل قفل النسخة", value=config.get("force_update") == "true")
+        apk_url = st.text_input("رابط APK", value=config.get("next_url", ""))
+        if st.form_submit_button("💾 تطبيق الإعدادات", type="primary"):
+            if save_config({"latest_version": version, "force_update": str(force_update).lower(), "next_url": apk_url}):
+                st.success("تم حفظ إعدادات التحديث")
+
+elif menu.startswith("⚡"):
+    page_header("⚡ البيانات الحية", "عدّل إعدادات التشغيل وأرسلها إلى جميع الأجهزة.")
+    config = run_query("SELECT key, value FROM myapp.app_config ORDER BY key")
+    if config is not None:
+        edited = st.data_editor(config, use_container_width=True, hide_index=True, num_rows="dynamic")
+        if st.button("💾 حفظ وإرسال إلى الهواتف", type="primary"):
+            values = {
+                str(row["key"]): row["value"]
+                for _, row in edited.dropna(subset=["key"]).iterrows()
+            }
+            if save_config(values):
+                st.toast("تم تحديث البيانات الحية")
+                st.rerun()
+
+elif menu.startswith("🤖"):
+    page_header("🤖 مركز أجهزة الاختبار", "أنشئ بيانات محاكاة بأمان لاختبار الأداء والواجهات.")
+    col1, col2 = st.columns(2)
+    with col1:
+        amount = st.number_input("عدد الأجهزة", min_value=10, max_value=1000, value=100, step=10)
+        if st.button("🚀 حقن جيش الاختبار", type="primary"):
+            run_query(
+                """
+                INSERT INTO myapp.users_status
+                    (device_id, phone, status, expiry_date, last_active)
+                SELECT 'sim_' || md5(random()::text),
+                       '079' || LPAD(i::text, 7, '0'),
+                       'Active', NOW() + interval '30 days', NOW()
+                FROM generate_series(1, %s) AS series(i)
+                """,
+                (int(amount),),
+                is_select=False,
+            )
+            st.success("تم إنشاء أجهزة الاختبار")
+    with col2:
+        st.warning("سيحذف هذا الإجراء جميع الأجهزة التي تبدأ بـ sim_.")
+        if st.button("🗑️ إبادة المحاكاة", type="primary"):
+            run_query(
+                "DELETE FROM myapp.users_status WHERE device_id LIKE 'sim_%%'",
+                is_select=False,
+            )
+            st.success("تم حذف بيانات المحاكاة")
+            st.rerun()
+
+elif menu.startswith("📊"):
+    page_header("📊 التحليل الفضائي للنشاط", "استكشف العلاقة بين النشاط والزمن والأجهزة في عرض ثلاثي الأبعاد.")
+    activity = run_query(
+        """
+        SELECT accepted_clicks AS z, phone AS x, last_active AS y
+        FROM myapp.users_status
+        WHERE accepted_clicks > 0
+        ORDER BY accepted_clicks DESC
+        LIMIT 300
+        """
     )
+    if activity is not None and not activity.empty:
+        activity["time_idx"] = pd.to_datetime(activity["y"], errors="coerce").astype("int64") // 10**12
+        figure = px.scatter_3d(
+            activity,
+            x="x",
+            y="time_idx",
+            z="z",
+            color="z",
+            template="plotly_dark",
+            labels={"x": "الهاتف", "time_idx": "الوقت", "z": "النقرات"},
+            color_continuous_scale="Turbo",
+        )
+        figure.update_layout(height=650, margin=dict(l=0, r=0, t=30, b=0))
+        st.plotly_chart(figure, use_container_width=True)
+    else:
+        st.info("لا توجد بيانات نشاط كافية للعرض.")
 
+elif menu.startswith(("🤝", "🖥️", "🔐", "🛠️", "💳")):
+    page_header(menu, "هذا القسم مهيأ للتوسعة ومربوط بمصدر البيانات الحالي.")
+    st.info("يمكن توسيع هذه الوحدة لإضافة منطق الموزعين، الأكواد، الصلاحيات، الدعم، ومراقبة الخادم.")
+    preview = run_query("SELECT * FROM myapp.users_status LIMIT 5")
+    if preview is not None:
+        render_table(preview, height=260)
 
-# ============================================================
-# أمثلة ربط التسجيل بالعمليات الحالية
-# ضع السطر بعد نجاح كل عملية في كودك الحالي:
-# ============================================================
-# بعد تعديل مستخدم:
-# log_admin_action("update", device_id=device_id, details=f"phone={phone}, tier={tier}")
-# بعد تصفير النقرات:
-# log_admin_action("reset", device_id=device_id, details="accepted_clicks=0")
-# بعد تغيير التجميد:
-# log_admin_action("freeze", device_id=device_id, details="تم تغيير حالة التجميد")
-# بعد حذف جهاز:
-# log_admin_action("delete", device_id=device_id, details="تم حذف الجهاز من الأسطول")
-# بعد تسجيل الدخول:
-# log_admin_action("login", details="تم تسجيل دخول المشرف")
-
-# ============================================================
-# إضافة صفحة السجل إلى القائمة الجانبية
-# عدّل شرط menu في آخر الملف:
-# ============================================================
-# elif menu.startswith("🧾"):
-#     render_audit_log_page()
-#
-# وأضف هذا العنصر إلى MENU_ITEMS:
-# "🧾 سجل نشاط المشرفين",
+else:
+    st.warning("اختر وحدة من القائمة الجانبية.")
