@@ -38,14 +38,35 @@ st.markdown(
         --orange: #ffb454;
         --red: #ff5c7a;
         --text-soft: #a9b8d0;
+        --text: #f4f7fb;
+        --muted: #8fa2bf;
+        --radius-lg: 22px;
+        --radius-md: 14px;
     }
 
-    html, body, [class*="css"] {
+    html, body, [class*="css"], .stMarkdown, .stTextInput,
+    .stTextArea, .stSelectbox, .stNumberInput, .stRadio,
+    .stButton, .stDataFrame, .stDataEditor {
         font-family: 'Cairo', sans-serif;
         direction: rtl;
         text-align: right;
         background: var(--bg);
-        color: white;
+        color: var(--text);
+    }
+
+    h1, h2, h3, h4, h5, h6 {
+        color: var(--text) !important;
+        font-weight: 900 !important;
+        letter-spacing: -.02em;
+    }
+
+    p, label, .stCaption, [data-testid="stMarkdownContainer"] {
+        line-height: 1.85;
+    }
+
+    .stCaption, [data-testid="stCaptionContainer"] {
+        color: var(--muted) !important;
+        font-size: .9rem;
     }
 
     [data-testid="stSidebar"] {
@@ -59,7 +80,7 @@ st.markdown(
         margin: 0 0 1.5rem;
         padding: 2rem 2.25rem;
         border: 1px solid rgba(0,229,255,.25);
-        border-radius: 24px;
+        border-radius: var(--radius-lg);
         background:
             radial-gradient(circle at 10% 10%, rgba(0,229,255,.18), transparent 32%),
             radial-gradient(circle at 90% 90%, rgba(66,133,255,.18), transparent 35%),
@@ -67,8 +88,8 @@ st.markdown(
         box-shadow: 0 18px 55px rgba(0,0,0,.22);
     }
 
-    .hero h1 { margin: 0; color: #fff; font-size: 2.2rem; font-weight: 900; }
-    .hero p { margin: .35rem 0 0; color: var(--text-soft); font-size: 1rem; }
+    .hero h1 { margin: 0; color: #fff; font-size: clamp(1.55rem, 3vw, 2.2rem); font-weight: 900; }
+    .hero p { margin: .45rem 0 0; color: var(--text-soft); font-size: 1rem; }
 
     .logo-container { text-align: center; padding: 1rem 0 0.5rem; }
     .neon-circle {
@@ -98,6 +119,18 @@ st.markdown(
         box-shadow: 0 8px 25px rgba(0,0,0,.12);
     }
 
+    [data-testid="stMetricLabel"] {
+        color: var(--muted) !important;
+        font-size: .9rem !important;
+        font-weight: 700 !important;
+    }
+
+    [data-testid="stMetricValue"] {
+        color: var(--cyan) !important;
+        font-size: 1.65rem !important;
+        font-weight: 900 !important;
+    }
+
     .stButton > button {
         width: 100%;
         min-height: 2.8rem;
@@ -118,6 +151,60 @@ st.markdown(
         border: 1px solid var(--line);
         border-radius: 16px;
         background: var(--panel);
+    }
+
+    div[data-testid="stExpander"] summary p {
+        color: var(--text) !important;
+        font-weight: 800;
+    }
+
+    [data-testid="stDataFrame"], [data-testid="stDataEditor"] {
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-md);
+        background: var(--panel);
+        box-shadow: 0 10px 30px rgba(0,0,0,.14);
+    }
+
+    [data-testid="stDataFrame"] iframe,
+    [data-testid="stDataEditor"] iframe {
+        border-radius: var(--radius-md);
+    }
+
+    [data-testid="stDataFrame"] [role="columnheader"],
+    [data-testid="stDataEditor"] [role="columnheader"] {
+        background: #1b2c4a !important;
+        color: #bfefff !important;
+        font-weight: 900 !important;
+    }
+
+    [data-testid="stDataFrame"] [role="gridcell"],
+    [data-testid="stDataEditor"] [role="gridcell"] {
+        color: #e7eef8 !important;
+        border-color: #263957 !important;
+        font-size: .92rem !important;
+    }
+
+    [data-testid="stDataFrame"] [role="row"]:nth-child(even),
+    [data-testid="stDataEditor"] [role="row"]:nth-child(even) {
+        background: rgba(22,35,61,.62) !important;
+    }
+
+    [data-testid="stDataFrame"] [role="row"]:hover,
+    [data-testid="stDataEditor"] [role="row"]:hover {
+        background: rgba(0,229,255,.08) !important;
+    }
+
+    .section-title {
+        display: flex;
+        align-items: center;
+        gap: .65rem;
+        margin: 1.3rem 0 .55rem;
+        padding-bottom: .45rem;
+        border-bottom: 1px solid var(--line);
+        color: var(--text);
+        font-size: 1.15rem;
+        font-weight: 900;
     }
 
     .section-caption {
@@ -272,6 +359,21 @@ def page_header(title: str, subtitle: str) -> None:
     )
 
 
+def section_title(title: str) -> None:
+    """Render a consistent section heading across all dashboard pages."""
+    st.markdown(f"<div class='section-title'>{title}</div>", unsafe_allow_html=True)
+
+
+def render_table(frame: pd.DataFrame, *, height: int = 320) -> None:
+    """Render a clean, compact, right-to-left data table."""
+    st.dataframe(
+        frame,
+        use_container_width=True,
+        hide_index=True,
+        height=height,
+    )
+
+
 # ============================================================
 # 4. صفحات لوحة التحكم
 # ============================================================
@@ -302,7 +404,7 @@ if menu.startswith("📈"):
         """
     )
     if versions is not None and not versions.empty:
-        st.subheader("📊 خريطة انتشار الإصدارات")
+        section_title("📊 خريطة انتشار الإصدارات")
         chart = px.bar(
             versions,
             x="app_version",
@@ -483,7 +585,7 @@ elif menu.startswith(("🤝", "🖥️", "🔐", "🛠️", "💳")):
     st.info("يمكن توسيع هذه الوحدة لإضافة منطق الموزعين، الأكواد، الصلاحيات، الدعم، ومراقبة الخادم.")
     preview = run_query("SELECT * FROM myapp.users_status LIMIT 5")
     if preview is not None:
-        st.dataframe(preview, use_container_width=True, hide_index=True)
+        render_table(preview, height=260)
 
 else:
     st.warning("اختر وحدة من القائمة الجانبية.")
