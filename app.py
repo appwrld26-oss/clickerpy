@@ -419,10 +419,21 @@ if menu.startswith("📈"):
     st.rerun()
 
 elif menu.startswith("👥"):
-    page_header("👥 إدارة أسطول الكباتن", "ابحث، حدّث، جمّد أو أعد ضبط الأجهزة من مكان واحد.")
+    page_header("👥 إدارة أسطول الكباتن", "جدول شامل بأسلوب Excel لمراقبة المستخدمين وحالة البوت لحظياً.")
     search = st.text_input("🔍 ابحث برقم الهاتف أو معرّف الجهاز")
     base_query = """
-        SELECT * FROM myapp.users_status
+        SELECT users_status.*,
+               CASE
+                   WHEN last_active >= NOW() - INTERVAL '5 minutes'
+                   THEN '🟢 Online'
+                   ELSE '🔴 Offline'
+               END AS bot_connection,
+               CASE
+                   WHEN last_active >= NOW() - INTERVAL '5 minutes'
+                   THEN TRUE
+                   ELSE FALSE
+               END AS bot_online
+        FROM myapp.users_status
         WHERE device_id NOT LIKE 'sim_%%'
     """
     params: list[str] = []
@@ -436,12 +447,50 @@ elif menu.startswith("👥"):
     if users is None or users.empty:
         st.info("لا توجد أجهزة مطابقة للبحث.")
     else:
+        section_title("📋 جدول المستخدمين — عرض Excel")
+        st.caption("🟢 Online = نشاط خلال آخر 5 دقائق  |  🔴 Offline = لا يوجد نشاط حديث")
+
+        # ترتيب الأعمدة المهمة أولاً مع إبقاء جميع معلومات قاعدة البيانات ظاهرة.
+        priority_columns = [
+            "bot_connection", "phone", "device_id", "accepted_clicks",
+            "app_version", "status", "sub_tier", "last_active",
+            "expiry_date", "is_frozen", "notice_message",
+        ]
+        visible_columns = [column for column in priority_columns if column in users.columns]
+        visible_columns += [column for column in users.columns if column not in visible_columns and column != "bot_online"]
+        excel_view = users[visible_columns].copy()
+        excel_view = excel_view.rename(columns={
+            "bot_connection": "حالة البوت",
+            "phone": "رقم الهاتف",
+            "device_id": "معرّف الجهاز",
+            "accepted_clicks": "عدد النقرات",
+            "app_version": "رقم الإصدار",
+            "status": "الحالة العامة",
+            "sub_tier": "الفئة",
+            "last_active": "آخر نشاط",
+            "expiry_date": "تاريخ الانتهاء",
+            "is_frozen": "مجمد؟",
+            "notice_message": "رسالة التنبيه",
+        })
+        render_table(excel_view, height=480)
+
+        st.download_button(
+            "📥 تنزيل بيانات المستخدمين CSV",
+            data=excel_view.to_csv(index=False).encode("utf-8-sig"),
+            file_name=f"myclicker_users_{datetime.now():%Y%m%d_%H%M}.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
+
+        section_title("🛠️ أدوات التحكم السريع")
         for _, user in users.iterrows():
             device_id = str(user.get("device_id", ""))
             phone = str(user.get("phone", ""))
             clicks = int(user.get("accepted_clicks") or 0)
             frozen = bool(user.get("is_frozen", False))
-            with st.expander(f"📱 {phone}  |  {device_id[:12]}...  |  🎯 {clicks:,}"):
+            connection = str(user.get("bot_connection", "🔴 Offline"))
+            version = str(user.get("app_version", "غير معروف"))
+            with st.expander(f"{connection}  |  📱 {phone}  |  🎯 {clicks:,} نقرة  |  الإصدار {version}"):
                 col1, col2, col3, col4 = st.columns(4)
                 with col1:
                     new_phone = st.text_input("تعديل الهاتف", value=phone, key=f"phone_{device_id}")
