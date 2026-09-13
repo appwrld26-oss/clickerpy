@@ -78,7 +78,7 @@ def run_query(query, params=None, is_select=True):
                 conn.commit()
                 return True
     except Exception as e:
-        st.error(f"⚠️ خطأ: {e}")
+        st.error(f"❌ خطأ فني: {e}")
         return None
 
 # ============================================================
@@ -126,7 +126,7 @@ with st.sidebar:
         st.session_state.auth = False; st.rerun()
 
 # ============================================================
-# 5. الصفحات والوظائف (كاملة وبدون تبسيط)
+# 5. الصفحات والوظائف (كاملة ومصححة)
 # ============================================================
 
 # 5.1 الإحصائيات العامة
@@ -152,51 +152,57 @@ elif menu == "👥 إدارة ومراقبة المستخدمين":
     st.title("👥 التحكم الكامل في الكباتن")
     search = st.text_input("🔍 ابحث برقم هاتف أو ID")
     users = run_query(f"SELECT * FROM myapp.users_status WHERE phone LIKE '%%{search}%%' OR device_id LIKE '%%{search}%%' ORDER BY last_active DESC LIMIT 100")
-    for _, u in users.iterrows():
-        with st.expander(f"📱 {u['phone']} | 🎯 {u['accepted_clicks']} | {'✅ نشط' if not u['is_frozen'] else '❄️ مجمد'}"):
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                new_p = st.text_input("تعديل الهاتف", value=u['phone'], key=f"p_{u['device_id']}")
-                if st.button("💾 حفظ", key=f"s_{u['device_id']}"):
-                    run_query("UPDATE myapp.users_status SET phone=%s WHERE device_id=%s", (new_p, u['device_id']), False); st.toast("تم الحفظ")
-            with c2:
-                if st.button("❄️ تجميد / فك", key=f"f_{u['device_id']}"):
-                    run_query("UPDATE myapp.users_status SET is_frozen=NOT is_frozen WHERE device_id=%s", (u['device_id'],), False); st.rerun()
-            with c3:
-                if st.button("🗑️ حذف نهائي", key=f"d_{u['device_id']}", type="primary"):
-                    run_query("DELETE FROM myapp.users_status WHERE device_id=%s", (u['device_id'],), False); st.rerun()
+    if users is not None:
+        for _, u in users.iterrows():
+            with st.expander(f"📱 {u['phone']} | 🎯 {u['accepted_clicks']} | {'✅ نشط' if not u['is_frozen'] else '❄️ مجمد'}"):
+                c1, c2, c3 = st.columns(3)
+                with c1:
+                    new_p = st.text_input("تعديل الهاتف", value=u['phone'], key=f"p_{u['device_id']}")
+                    if st.button("💾 حفظ", key=f"s_{u['device_id']}"):
+                        run_query("UPDATE myapp.users_status SET phone=%s WHERE device_id=%s", (new_p, u['device_id']), is_select=False); st.toast("تم الحفظ")
+                with c2:
+                    if st.button("❄️ تجميد / فك", key=f"f_{u['device_id']}"):
+                        run_query("UPDATE myapp.users_status SET is_frozen=NOT is_frozen WHERE device_id=%s", (u['device_id'],), is_select=False); st.rerun()
+                with c3:
+                    if st.button("🗑️ حذف نهائي", key=f"d_{u['device_id']}", type="primary"):
+                        run_query("DELETE FROM myapp.users_status WHERE device_id=%s", (u['device_id'],), is_select=False); st.rerun()
 
 # 5.3 الإشعارات
 elif menu == "📢 مركز الإشعارات الشامل":
     st.title("📢 بث الرسائل المنسدلة")
     msg = st.text_area("نص الإشعار")
-    if st.button("🚀 بث فوري للجميع"):
-        run_query("UPDATE myapp.users_status SET notice_message=%s", (msg,), False)
+    col1, col2 = st.columns(2)
+    if col1.button("🚀 بث فوري للجميع"):
+        run_query("UPDATE myapp.users_status SET notice_message=%s", (msg,), is_select=False)
         st.success("تم البث بنجاح!")
+    if col2.button("🧹 مسح كافة الإشعارات"):
+        run_query("UPDATE myapp.users_status SET notice_message = NULL", is_select=False)
+        st.toast("تم تنظيف الشاشات")
 
 # 5.4 التحديث الإجباري
 elif menu == "🚀 إدارة التحديثات الإجبارية":
     st.title("🚀 نظام قفل الإصدارات")
     config = run_query("SELECT key, value FROM myapp.app_config")
-    c_dict = dict(zip(config['key'], config['value']))
+    c_dict = dict(zip(config['key'], config['value'])) if config is not None else {}
     with st.form("up"):
         v = st.text_input("أحدث نسخة", value=c_dict.get('latest_version', '7.2.8'))
         f = st.checkbox("قفل النسخ القديمة (Force)", value=c_dict.get('force_update')=='true')
         u = st.text_input("رابط APK", value=c_dict.get('next_url', ''))
         if st.form_submit_button("تطبيق الحماية"):
             for k, val in {'latest_version':v, 'force_update':str(f).lower(), 'next_url':u}.items():
-                run_query("INSERT INTO myapp.app_config (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value", (k, val), False)
+                run_query("INSERT INTO myapp.app_config (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value", (k, val), is_select=False)
             st.toast("تم تفعيل نظام الحماية!")
 
 # 5.5 تحديث البيانات الحية (Live Update)
 elif menu == "⚡ تحديث البيانات الحية (LIVE UPDATE)":
     st.title("⚡ ذكاء البوت (Keywords)")
     config = run_query("SELECT key, value FROM myapp.app_config")
-    edited = st.data_editor(config, use_container_width=True)
-    if st.button("حفظ وإرسال التحديث الحي"):
-        for _, r in edited.iterrows():
-            run_query("INSERT INTO myapp.app_config (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value", (r['key'], r['value']), False)
-        st.toast("تم التحديث الحي!")
+    if config is not None:
+        edited = st.data_editor(config, use_container_width=True)
+        if st.button("حفظ وإرسال التحديث الحي"):
+            for _, r in edited.iterrows():
+                run_query("INSERT INTO myapp.app_config (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value", (r['key'], r['value']), is_select=False)
+            st.toast("تم التحديث الحي!")
 
 # 5.6 توليد الأكواد
 elif menu == "💳 توليد وإدارة الأكواد":
@@ -204,43 +210,44 @@ elif menu == "💳 توليد وإدارة الأكواد":
     num = st.number_input("الكمية", 1, 100, 5)
     if st.button("✨ إنتاج المفاتيح"):
         keys = [f"PRO-{random.randint(100,999)}-{hashlib.md5(str(random.random()).encode()).hexdigest()[:4].upper()}" for _ in range(num)]
-        for k in keys: run_query("INSERT INTO myapp.subscriptions (code, duration_days) VALUES (%s, 30)", (k,), False)
+        for k in keys: run_query("INSERT INTO myapp.subscriptions (code, duration_days) VALUES (%s, 30)", (k,), is_select=False)
         st.code("\n".join(keys))
 
 # 5.7 قسم الموزعين
 elif menu == "🤝 قسم الشركاء (الموزعين)":
     st.title("🤝 الموزعون والشركاء")
-    st.info("إحصائيات توزيع الحسابات حسب المناطق والفئات.")
     tiers = run_query("SELECT sub_tier, count(*) FROM myapp.users_status GROUP BY sub_tier")
-    st.bar_chart(tiers.set_index('sub_tier'))
+    if tiers is not None:
+        st.bar_chart(tiers.set_index('sub_tier'))
 
 # 5.8 تحليل 3D
 elif menu == "📊 تحليل البيانات 3D":
     st.title("🌌 التحليل الفضائي للنشاط")
     df = run_query("SELECT accepted_clicks as z, phone as x, last_active as y FROM myapp.users_status WHERE accepted_clicks > 0 LIMIT 300")
-    if not df.empty:
+    if df is not None and not df.empty:
         df['time_idx'] = pd.to_datetime(df['y']).astype('int64') // 10**12
         st.plotly_chart(px.scatter_3d(df, x='x', y='time_idx', z='z', color='z', template="plotly_white"), use_container_width=True)
 
 # 5.9 حالة السيرفر
 elif menu == "🖥️ حالة السيرفر والاتصال":
-    st.title("🖥️ موارد النظام")
+    st.title("🖥️ مراقبة الخادم")
     col1, col2 = st.columns(2)
     col1.success("قاعدة بيانات نيون: متصلة ✅")
     col2.info("زمن استجابة العمليات: 30ms ⚡")
-    st.subheader("سجل آخر المزامنات")
-    st.dataframe(run_query("SELECT device_id, phone, accepted_clicks, last_active FROM myapp.users_status ORDER BY last_active DESC LIMIT 10"), use_container_width=True)
+    recent = run_query("SELECT device_id, phone, accepted_clicks, last_active FROM myapp.users_status ORDER BY last_active DESC LIMIT 10")
+    st.dataframe(recent, use_container_width=True)
 
 # 5.10 جيش المحاكاة
 elif menu == "🤖 إضافة الأجهزة الافتراضية (TEST)":
-    st.title("🤖 محرك توليد ضغط الاختبار")
+    st.title("🤖 محرك الاختبار")
     n = st.slider("كم جهاز تريد حقنه؟", 100, 1000, 500)
     if st.button("🚀 إطلاق الجيش"):
-        run_query("INSERT INTO myapp.users_status (device_id, phone, status, expiry_date, last_active) SELECT 'sim_'||md5(random()::text), '079'||LPAD(i::text,7,'0'), 'Active', NOW()+interval '30 days', NOW() FROM generate_series(1, %s) s(i) ON CONFLICT DO NOTHING", (n,), False)
+        run_query("INSERT INTO myapp.users_status (device_id, phone, status, expiry_date, last_active) SELECT 'sim_'||md5(random()::text), '079'||LPAD(i::text,7,'0'), 'Active', NOW()+interval '30 days', NOW() FROM generate_series(1, %s) s(i) ON CONFLICT DO NOTHING", (n,), is_select=False)
         st.success("تم بنجاح!")
     if st.button("🗑️ مسح كافة المحاكاة"):
-        run_query("DELETE FROM myapp.users_status WHERE device_id LIKE 'sim_%%'", fetch=False); st.rerun()
+        run_query("DELETE FROM myapp.users_status WHERE device_id LIKE 'sim_%%'", is_select=False)
+        st.rerun()
 
-# تحديث تلقائي للصفحة الرئيسية
-if menu == "📈 إحصائيات النشاط العام":
+# تحديث تلقائي
+if menu == "📈 نظرة عامة وإحصائيات الإصدارات":
     time.sleep(15); st.rerun()
