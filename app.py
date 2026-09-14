@@ -213,6 +213,65 @@ st.markdown(
         margin-top: -0.7rem;
         margin-bottom: 1rem;
     }
+
+    /* Responsive command-center polish */
+    [data-testid="stAppViewContainer"] > .main {
+        padding: 1.1rem clamp(.75rem, 2.5vw, 2.6rem) 3rem;
+    }
+    [data-testid="stVerticalBlock"] > [style*="flex-direction: column"] {
+        gap: .85rem;
+    }
+    .stButton > button, .stDownloadButton > button {
+        white-space: normal;
+        line-height: 1.35;
+        padding: .55rem .75rem;
+    }
+    [data-testid="stDataFrame"], [data-testid="stDataEditor"] {
+        max-width: 100%;
+        overflow-x: auto;
+    }
+    div[data-testid="stExpander"] {
+        box-shadow: 0 5px 18px rgba(68,119,145,.07);
+    }
+    div[data-testid="stExpander"] summary {
+        min-height: 3rem;
+        align-items: center;
+    }
+    div[data-testid="stForm"] {
+        padding: 1rem;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-md);
+        background: linear-gradient(135deg, #ffffff, #f4fafc);
+        box-shadow: 0 8px 24px rgba(68,119,145,.08);
+    }
+    [data-testid="stAlert"] {
+        border-radius: 14px;
+    }
+    @media (max-width: 1100px) {
+        [data-testid="stAppViewContainer"] > .main { padding-inline: 1rem; }
+        .hero { padding: 1.45rem 1.35rem; }
+        .stMetric { padding: .85rem .8rem; }
+        [data-testid="stMetricValue"] { font-size: 1.35rem !important; }
+    }
+    @media (max-width: 760px) {
+        [data-testid="stSidebar"] { min-width: 240px; max-width: 82vw; }
+        .hero { margin-bottom: 1rem; border-radius: 16px; }
+        .hero h1 { font-size: 1.35rem; }
+        .hero p { font-size: .88rem; }
+        .section-title { font-size: 1rem; margin-top: 1rem; }
+        .stButton > button, .stDownloadButton > button { min-height: 2.65rem; font-size: .86rem; }
+        [data-testid="stDataFrame"], [data-testid="stDataEditor"] { font-size: .78rem; }
+        [data-testid="stMetricLabel"] { font-size: .75rem !important; }
+        [data-testid="stMetricValue"] { font-size: 1.08rem !important; }
+        div[data-testid="stForm"] { padding: .75rem; }
+    }
+    @media (max-width: 480px) {
+        [data-testid="stAppViewContainer"] > .main { padding: .65rem .55rem 2rem; }
+        .hero { padding: 1.1rem 1rem; }
+        .hero h1 { font-size: 1.15rem; }
+        .stCaption, [data-testid="stCaptionContainer"] { font-size: .76rem; }
+        div[data-testid="stExpander"] summary p { font-size: .82rem; }
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -294,6 +353,32 @@ def save_config(values: dict[str, Any]) -> bool:
     return True
 
 
+def ensure_management_tables() -> None:
+    """Create optional management tables without changing existing connection paths."""
+    statements = [
+        """CREATE TABLE IF NOT EXISTS myapp.app_staff (
+            id BIGSERIAL PRIMARY KEY, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL,
+            display_name TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'monitor', active BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        """CREATE TABLE IF NOT EXISTS myapp.activation_codes_audit (
+            id BIGSERIAL PRIMARY KEY, code TEXT NOT NULL, category TEXT NOT NULL DEFAULT 'STANDARD',
+            status TEXT NOT NULL DEFAULT 'generated', employee_name TEXT, action TEXT NOT NULL DEFAULT 'generated',
+            device_id TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), action_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        """CREATE TABLE IF NOT EXISTS myapp.partners (
+            id BIGSERIAL PRIMARY KEY, name TEXT UNIQUE NOT NULL, category TEXT NOT NULL DEFAULT 'STANDARD',
+            commission NUMERIC(10,2) NOT NULL DEFAULT 0, active BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+    ]
+    for statement in statements:
+        run_query(statement, is_select=False)
+
+
+ensure_management_tables()
+
+
 # ============================================================
 # 3. جلسة المستخدم والمكونات المشتركة
 # ============================================================
@@ -316,10 +401,22 @@ if not st.session_state.auth:
         username = st.text_input("👤 اسم المستخدم")
         password = st.text_input("🔑 كلمة السر", type="password")
         if st.button("دخول إلى غرفة القيادة 🚀", type="primary"):
+            staff = run_query(
+                "SELECT username, display_name, role FROM myapp.app_staff WHERE username=%s AND password_hash=%s AND active=TRUE LIMIT 1",
+                (username.strip(), hashlib.sha256(password.encode()).hexdigest()),
+            )
             if username == "admin" and password == "admin123":
                 st.session_state.auth = True
+                st.session_state.staff_name = "المدير العام"
+                st.session_state.staff_role = "admin"
                 st.rerun()
-            st.error("بيانات الدخول غير صحيحة")
+            elif staff is not None and not staff.empty:
+                st.session_state.auth = True
+                st.session_state.staff_name = str(staff.iloc[0]["display_name"])
+                st.session_state.staff_role = str(staff.iloc[0]["role"])
+                st.rerun()
+            else:
+                st.error("بيانات الدخول غير صحيحة أو الحساب غير مفعّل")
     st.stop()
 
 
@@ -336,13 +433,14 @@ MENU_ITEMS = [
     "🖥️ حالة السيرفر",
     "🔐 إدارة الصلاحيات والتحكم",
     "🛠️ الدعم الفني والتواصل",
+    "📱 السوشال ميديا والتواصل",
     "🤖 إضافة الأجهزة الافتراضية (TEST)",
 ]
 
 with st.sidebar:
     st.markdown("<div class='logo-container'><div class='neon-circle'>⚡</div></div>", unsafe_allow_html=True)
     st.markdown("<h3 style='text-align:center;color:#00E5FF;'>MyClicker Pro</h3>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align:center;color:#a9b8d0;'>المستخدم: admin</p>", unsafe_allow_html=True)
+    st.markdown(f"<p style='text-align:center;color:#a9b8d0;'>المستخدم: {st.session_state.get('staff_name', 'المدير العام')}</p>", unsafe_allow_html=True)
     if st.button("🔄 مسح الذاكرة والتحديث"):
         st.cache_data.clear()
         st.rerun()
@@ -419,12 +517,16 @@ if menu.startswith("📈"):
             labels={"app_version": "الإصدار", "devices": "عدد الأجهزة"},
             color_continuous_scale="blues",
         )
+        chart.update_layout(height=390, margin=dict(l=10, r=10, t=30, b=10), paper_bgcolor="#ffffff", plot_bgcolor="#f2f6f9")
         st.plotly_chart(chart, use_container_width=True)
     if st.button("🔄 تحديث التحليلات"):
         st.rerun()
 
 elif menu.startswith("👥"):
     page_header("👥 إدارة أسطول الكباتن", "جدول شامل بأسلوب Excel لمراقبة المستخدمين وحالة البوت لحظياً.")
+    version_config = fetch_config()
+    required_version = version_config.get("latest_version", "7.2.8")
+    st.caption(f"النسخة المطلوبة حالياً: **v{required_version}** — تتم مقارنة كل مستخدم ومزامنته مع هذه النسخة.")
     search = st.text_input("🔍 ابحث برقم الهاتف أو معرّف الجهاز")
     base_query = """
         SELECT users_status.*,
@@ -437,7 +539,8 @@ elif menu.startswith("👥"):
                    WHEN last_active >= NOW() - INTERVAL '5 minutes'
                    THEN TRUE
                    ELSE FALSE
-               END AS bot_online
+               END AS bot_online,
+               GREATEST(0, CEIL(EXTRACT(EPOCH FROM (expiry_date - NOW())) / 86400))::int AS days_remaining
         FROM myapp.users_status
         WHERE device_id NOT LIKE 'sim_%%'
     """
@@ -452,6 +555,14 @@ elif menu.startswith("👥"):
     if users is None or users.empty:
         st.info("لا توجد أجهزة مطابقة للبحث.")
     else:
+        def version_key(value: object) -> tuple[int, ...]:
+            try:
+                return tuple(int(part) for part in str(value).lstrip("vV").split(".") if part.isdigit())
+            except ValueError:
+                return (0,)
+
+        required_key = version_key(required_version)
+        users["version_status"] = users["app_version"].map(lambda value: "✅ محدث" if version_key(value) == required_key else "⚠️ يحتاج مزامنة")
         st.markdown("### ⚡ التفعيل الجماعي والاشتراكات")
         activation_ids = st.multiselect(
             "اختر الأجهزة المطلوب تفعيلها",
@@ -460,7 +571,11 @@ elif menu.startswith("👥"):
         )
         activation_col1, activation_col2 = st.columns(2)
         with activation_col1:
-            if st.button("🎁 تفعيل مجاني جماعي", disabled=not activation_ids, type="primary"):
+            free_enabled = version_config.get("free_activation_enabled", "true") == "true"
+            if st.button("⛔ إيقاف التفعيل المجاني الجماعي" if free_enabled else "✅ تفعيل المجاني الجماعي", type="secondary"):
+                save_config({"free_activation_enabled": str(not free_enabled).lower()})
+                st.rerun()
+            if st.button("🎁 تفعيل مجاني جماعي", disabled=not activation_ids or not free_enabled, type="primary"):
                 run_query("UPDATE myapp.users_status SET status='Active', expiry_date=NOW() + INTERVAL '30 days' WHERE device_id = ANY(%s)", (activation_ids,), is_select=False)
                 st.success(f"تم تفعيل {len(activation_ids)} جهاز مجاناً لمدة 30 يوماً")
                 st.rerun()
@@ -470,14 +585,38 @@ elif menu.startswith("👥"):
                 run_query("UPDATE myapp.users_status SET status='Active', sub_tier=%s, expiry_date=NOW() + INTERVAL '30 days' WHERE device_id = ANY(%s)", (subscription_tier, activation_ids), is_select=False)
                 st.success(f"تم تفعيل اشتراك {subscription_tier} لـ {len(activation_ids)} جهاز")
                 st.rerun()
+        if st.button("💳 تفعيل النظام الشامل لجميع الأجهزة", type="primary"):
+            result = run_query("UPDATE myapp.users_status SET status='Active', sub_tier=%s, expiry_date=NOW() + INTERVAL '30 days' WHERE device_id NOT LIKE 'sim_%%'", (subscription_tier,), is_select=False)
+            if result is not None:
+                st.success(f"تم تفعيل الاشتراك الشامل {subscription_tier} لجميع الأجهزة لمدة 30 يوماً")
+                st.rerun()
+        if st.button("🔄 مزامنة الإصدار للأجهزة المحددة", disabled=not activation_ids):
+            result = run_query("UPDATE myapp.users_status SET app_version=%s WHERE device_id = ANY(%s)", (required_version, activation_ids), is_select=False)
+            if result is not None:
+                st.success(f"تمت مزامنة v{required_version} مع {len(activation_ids)} جهاز")
+                st.rerun()
+        if st.button("🔄 مزامنة الإصدارات الجماعية لجميع الأجهزة", type="primary"):
+            outdated = run_query(
+                "SELECT COUNT(*) AS total FROM myapp.users_status WHERE device_id NOT LIKE 'sim_%%' AND (app_version IS NULL OR app_version IS DISTINCT FROM %s)",
+                (required_version,),
+            )
+            outdated_count = int(outdated.iloc[0]["total"]) if outdated is not None and not outdated.empty else 0
+            result = run_query(
+                "UPDATE myapp.users_status SET app_version=%s WHERE device_id NOT LIKE 'sim_%%' AND (app_version IS NULL OR app_version IS DISTINCT FROM %s)",
+                (required_version, required_version),
+                is_select=False,
+            )
+            if result is not None:
+                st.success(f"تمت مزامنة الإصدار v{required_version} مع {outdated_count} جهاز")
+                st.rerun()
         section_title("📋 جدول المستخدمين — عرض Excel")
         st.caption("🟢 Online = نشاط خلال آخر 5 دقائق  |  🔴 Offline = لا يوجد نشاط حديث")
 
         # ترتيب الأعمدة المهمة أولاً مع إبقاء جميع معلومات قاعدة البيانات ظاهرة.
         priority_columns = [
             "bot_connection", "phone", "device_id", "accepted_clicks",
-            "app_version", "status", "sub_tier", "last_active",
-            "expiry_date", "is_frozen", "notice_message",
+            "app_version", "version_status", "status", "sub_tier", "last_active",
+            "expiry_date", "days_remaining", "is_frozen", "notice_message",
         ]
         visible_columns = [column for column in priority_columns if column in users.columns]
         visible_columns += [column for column in users.columns if column not in visible_columns and column != "bot_online"]
@@ -488,10 +627,12 @@ elif menu.startswith("👥"):
             "device_id": "معرّف الجهاز",
             "accepted_clicks": "عدد النقرات",
             "app_version": "رقم الإصدار",
+            "version_status": "حالة الإصدار",
             "status": "الحالة العامة",
             "sub_tier": "الفئة",
             "last_active": "آخر نشاط",
             "expiry_date": "تاريخ الانتهاء",
+            "days_remaining": "الأيام المتبقية",
             "is_frozen": "مجمد؟",
             "notice_message": "رسالة التنبيه",
         })
@@ -514,7 +655,7 @@ elif menu.startswith("👥"):
             connection = str(user.get("bot_connection", "🔴 Offline"))
             version = str(user.get("app_version", "غير معروف"))
             with st.expander(f"{connection}  |  📱 {phone}  |  🎯 {clicks:,} نقرة  |  الإصدار {version}"):
-                col1, col2, col3, col4 = st.columns(4)
+                col1, col2, col3, col4, col5, col6 = st.columns(6)
                 with col1:
                     new_phone = st.text_input("تعديل الهاتف", value=phone, key=f"phone_{device_id}")
                     tiers = ["VIP", "STANDARD", "TRIAL"]
@@ -559,14 +700,44 @@ elif menu.startswith("👥"):
                         )
                         st.toast("تم تغيير حالة الجهاز")
                         st.rerun()
+                with col5:
+                    st.write("**إعادة التهيئة**")
+                    if st.button("♻️ إعادة تهيئة الجهاز", key=f"reset_device_{device_id}"):
+                        result = run_query(
+                            """
+                            UPDATE myapp.users_status
+                               SET accepted_clicks=0,
+                                   status='Active',
+                                   is_frozen=FALSE,
+                                   notice_message=NULL,
+                                   last_active=NOW()
+                             WHERE device_id=%s
+                            """,
+                            (device_id,),
+                            is_select=False,
+                        )
+                        if result is not None:
+                            st.success(f"تمت إعادة تهيئة الجهاز {device_id}")
+                            st.rerun()
+                with col6:
+                    st.write("**الإصدار**")
+                    if st.button("🔄 مزامنة الإصدار", key=f"sync_version_{device_id}", disabled=version_key(version) == required_key):
+                        result = run_query("UPDATE myapp.users_status SET app_version=%s WHERE device_id=%s", (required_version, device_id), is_select=False)
+                        if result is not None:
+                            st.success(f"تم تحديث الإصدار إلى v{required_version}")
+                            st.rerun()
 
 elif menu.startswith("📢"):
     page_header("📢 مركز الإشعارات", "أرسل رسالة موحّدة إلى شريط إشعارات التطبيق.")
-    message = st.text_area("نص الرسالة", height=140, placeholder="اكتب الإعلان أو التنبيه هنا...")
+    notification_config = fetch_config()
+    notification_type = st.selectbox("نوع الإشعار", ["إعلان عام", "تنبيه مهم", "تحديث التطبيق", "انتهاء الاشتراك"], index=["إعلان عام", "تنبيه مهم", "تحديث التطبيق", "انتهاء الاشتراك"].index(notification_config.get("notification_type", "إعلان عام")) if notification_config.get("notification_type", "إعلان عام") in ["إعلان عام", "تنبيه مهم", "تحديث التطبيق", "انتهاء الاشتراك"] else 0)
+    message = st.text_area("نص الرسالة المنسدلة", value=notification_config.get("notice_message", ""), height=140, placeholder="اكتب الإعلان أو التنبيه هنا...")
+    notification_enabled = st.toggle("تفعيل ظهور الإشعار داخل التطبيق", value=notification_config.get("notification_enabled", "true") == "true")
     if st.button("🚀 بث فوري للجميع", type="primary"):
         if message.strip():
             run_query("UPDATE myapp.users_status SET notice_message = %s", (message.strip(),), is_select=False)
-            st.success("تم بث الرسالة بنجاح")
+            save_config({"notification_type": notification_type, "notice_message": message.strip(), "notification_enabled": str(notification_enabled).lower()})
+            st.success("تمت مزامنة الإشعار مع التطبيق وبثه للجميع")
         else:
             st.warning("اكتب رسالة قبل الإرسال")
 
@@ -579,7 +750,7 @@ elif menu.startswith("🚀"):
         apk_url = st.text_input("رابط APK", value=config.get("next_url", ""))
         if st.form_submit_button("💾 تطبيق الإعدادات", type="primary"):
             if save_config({"latest_version": version, "force_update": str(force_update).lower(), "next_url": apk_url}):
-                st.success("تم حفظ إعدادات التحديث")
+                st.success("تم حفظ إعدادات التحديث ومزامنتها مع التطبيق")
 
 elif menu.startswith("⚡"):
     page_header("⚡ البيانات الحية", "عدّل إعدادات التشغيل وأرسلها إلى جميع الأجهزة.")
@@ -592,7 +763,7 @@ elif menu.startswith("⚡"):
                 for _, row in edited.dropna(subset=["key"]).iterrows()
             }
             if save_config(values):
-                st.toast("تم تحديث البيانات الحية")
+                st.toast("تم تحديث البيانات الحية ومزامنتها مع التطبيق")
                 st.rerun()
 
 elif menu.startswith("🤖"):
@@ -658,6 +829,12 @@ elif menu.startswith("💳"):
     if st.button("🎟️ توليد أكواد جديدة", type="primary"):
         codes = [hashlib.sha256(f"{time.time_ns()}-{index}".encode()).hexdigest()[:12].upper() for index in range(int(quantity))]
         st.session_state.generated_codes = codes
+        for code in codes:
+            run_query(
+                "INSERT INTO myapp.activation_codes_audit (code, category, employee_name, action) VALUES (%s, %s, %s, 'generated')",
+                (code, "STANDARD", st.session_state.get("staff_name", "المدير العام")),
+                is_select=False,
+            )
         st.success(f"تم توليد {len(codes)} أكواد")
     generated_codes = st.session_state.get("generated_codes", [])
     if generated_codes:
@@ -666,9 +843,47 @@ elif menu.startswith("💳"):
         codes_frame = codes_frame.sort_values(sort_column).reset_index(drop=True)
         render_table(codes_frame, height=300)
         st.download_button("📥 تنزيل الأكواد CSV", codes_frame.to_csv(index=False).encode("utf-8-sig"), "myclicker_codes.csv", "text/csv")
+    section_title("🧾 سجل حركة الأكواد")
+    code_search = st.text_input("🔍 ابحث عن كود أو موظف أو جهاز", key="code_audit_search")
+    audit_query = "SELECT code, category, status, employee_name, action, device_id, created_at, action_at FROM myapp.activation_codes_audit"
+    audit_params: list[str] = []
+    if code_search.strip():
+        audit_query += " WHERE code ILIKE %s OR employee_name ILIKE %s OR device_id ILIKE %s"
+        pattern = f"%{code_search.strip()}%"
+        audit_params = [pattern, pattern, pattern]
+    audit_query += " ORDER BY action_at DESC LIMIT 300"
+    audit = run_query(audit_query, audit_params)
+    if audit is not None and not audit.empty:
+        audit = audit.rename(columns={"code": "الكود", "category": "التصنيف", "status": "الحالة", "employee_name": "اسم الموظف", "action": "الإجراء", "device_id": "الجهاز", "created_at": "تاريخ الإنشاء", "action_at": "وقت الإجراء"})
+        render_table(audit, height=360)
+    else:
+        st.info("لا يوجد سجل حركة للأكواد بعد.")
+    st.markdown("### 📝 تسجيل حركة كود")
+    action_code = st.text_input("الكود", key="action_code")
+    action_type = st.selectbox("نوع الحركة", ["copied", "transferred", "used"], format_func=lambda value: {"copied": "تم نسخه", "transferred": "تم نقله", "used": "تم استخدامه"}[value], key="action_type")
+    action_device = st.text_input("الجهاز المستخدم أو المستلم", key="action_device")
+    if st.button("💾 تسجيل الحركة"):
+        if action_code.strip():
+            result = run_query("INSERT INTO myapp.activation_codes_audit (code, status, employee_name, action, device_id) VALUES (%s, %s, %s, %s, %s)", (action_code.strip(), action_type, st.session_state.get("staff_name", "المدير العام"), action_type, action_device.strip() or None), is_select=False)
+            if result is not None:
+                st.success("تم تسجيل حركة الكود باسم الموظف والجهاز")
+                st.rerun()
 
 elif menu.startswith("🤝"):
-    page_header("🤝 قسم الشركاء", "ملخص توزيع الكباتن حسب الفئة والشريك.")
+    page_header("🤝 قسم الشركاء والتوزيع", "إدارة الموزعين وتصنيف التوزيع ومتابعة الاشتراكات والنقرات.")
+    with st.expander("➕ إضافة شريك جديد"):
+        partner_name = st.text_input("اسم الشريك", key="partner_name")
+        partner_category = st.selectbox("تصنيف الشريك", ["MASTER", "DISTRIBUTOR", "RESELLER", "AFFILIATE"], key="partner_category")
+        commission = st.number_input("نسبة العمولة", min_value=0.0, max_value=100.0, value=0.0, step=0.5, key="partner_commission")
+        if st.button("💾 حفظ الشريك"):
+            if partner_name.strip():
+                result = run_query("INSERT INTO myapp.partners (name, category, commission) VALUES (%s, %s, %s) ON CONFLICT (name) DO UPDATE SET category=EXCLUDED.category, commission=EXCLUDED.commission, active=TRUE", (partner_name.strip(), partner_category, commission), is_select=False)
+                if result is not None:
+                    st.success("تم حفظ الشريك")
+                    st.rerun()
+    partner_list = run_query("SELECT name, category, commission, active, created_at FROM myapp.partners ORDER BY created_at DESC")
+    if partner_list is not None and not partner_list.empty:
+        render_table(partner_list.rename(columns={"name": "اسم الشريك", "category": "التصنيف", "commission": "العمولة %", "active": "مفعّل", "created_at": "تاريخ الإنشاء"}), height=220)
     partners = run_query("SELECT COALESCE(sub_tier, 'STANDARD') AS tier, COUNT(*) AS devices, COALESCE(SUM(accepted_clicks), 0) AS clicks FROM myapp.users_status GROUP BY sub_tier ORDER BY devices DESC")
     if partners is not None and not partners.empty:
         st.plotly_chart(px.bar(partners, x="tier", y="devices", color="clicks", template="plotly_dark", labels={"tier": "الفئة", "devices": "الأجهزة", "clicks": "النقرات"}), use_container_width=True)
@@ -701,9 +916,48 @@ elif menu.startswith("🖥️"):
 
 elif menu.startswith("🔐"):
     page_header("🔐 إدارة الصلاحيات", "مراجعة أدوار المستخدمين وحدود الوصول إلى لوحة التحكم.")
+    st.markdown("### 👤 حسابات الموظفين")
+    with st.form("staff_account_form"):
+        new_username = st.text_input("اسم المستخدم الجديد")
+        new_display_name = st.text_input("اسم الموظف الظاهر")
+        new_password = st.text_input("كلمة المرور", type="password")
+        new_role = st.selectbox("الصلاحية", ["admin", "operator", "monitor"], format_func=lambda role: {"admin": "مدير النظام", "operator": "مشرف العمليات", "monitor": "مراقب"}[role])
+        if st.form_submit_button("➕ إنشاء الحساب"):
+            if new_username.strip() and new_display_name.strip() and new_password:
+                result = run_query("INSERT INTO myapp.app_staff (username, password_hash, display_name, role) VALUES (%s, %s, %s, %s) ON CONFLICT (username) DO UPDATE SET password_hash=EXCLUDED.password_hash, display_name=EXCLUDED.display_name, role=EXCLUDED.role, active=TRUE", (new_username.strip(), hashlib.sha256(new_password.encode()).hexdigest(), new_display_name.strip(), new_role), is_select=False)
+                if result is not None:
+                    st.success("تم إنشاء الحساب وتحديد الصلاحيات")
+                    st.rerun()
+            else:
+                st.warning("أكمل بيانات الحساب قبل الحفظ")
+    staff_list = run_query("SELECT username, display_name, role, active, created_at FROM myapp.app_staff ORDER BY created_at DESC")
+    if staff_list is not None and not staff_list.empty:
+        render_table(staff_list.rename(columns={"username": "اسم المستخدم", "display_name": "اسم الموظف", "role": "الصلاحية", "active": "مفعّل", "created_at": "تاريخ الإنشاء"}), height=240)
+        staff_to_toggle = st.selectbox("الحساب المطلوب تفعيله أو إيقافه", staff_list["username"].astype(str).tolist())
+        if st.button("🔁 تبديل حالة الحساب"):
+            run_query("UPDATE myapp.app_staff SET active=NOT active WHERE username=%s", (staff_to_toggle,), is_select=False)
+            st.success("تم تحديث حالة الحساب")
+            st.rerun()
     roles = pd.DataFrame({"اسم الصلاحية": ["مدير النظام", "مشرف العمليات", "مراقب"], "المشاهدة": ["كاملة", "كاملة", "كاملة"], "التعديل والحذف": ["مسموح", "مسموح", "ممنوع"], "التفعيل والاشتراكات": ["مسموح", "مسموح", "ممنوع"], "الإشعارات": ["إدارة وإرسال", "إدارة وإرسال", "مشاهدة"]})
     render_table(roles, height=180)
     st.info("يتم تطبيق صلاحيات العمليات الحساسة قبل تنفيذ الاستعلام في الخادم.")
+
+elif menu.startswith("📱"):
+    page_header("📱 السوشال ميديا والتواصل", "أدر روابط التواصل التي تظهر داخل التطبيق وشارك الحملات مع المستخدمين.")
+    social_config = fetch_config()
+    with st.form("social_media_form"):
+        st.markdown("### روابط الحسابات الرسمية")
+        instagram = st.text_input("Instagram", value=social_config.get("social_instagram", ""), placeholder="https://instagram.com/...")
+        facebook = st.text_input("Facebook", value=social_config.get("social_facebook", ""), placeholder="https://facebook.com/...")
+        telegram = st.text_input("Telegram", value=social_config.get("social_telegram", ""), placeholder="https://t.me/...")
+        whatsapp = st.text_input("WhatsApp", value=social_config.get("social_whatsapp", ""), placeholder="https://wa.me/...")
+        social_enabled = st.checkbox("إظهار روابط التواصل داخل التطبيق", value=social_config.get("social_enabled", "true") == "true")
+        campaign = st.text_area("رسالة الحملة الحالية", value=social_config.get("social_campaign", ""), placeholder="اكتب رسالة قصيرة للحملة أو العرض...")
+        if st.form_submit_button("💾 حفظ ومزامنة السوشال ميديا", type="primary"):
+            if save_config({"social_instagram": instagram, "social_facebook": facebook, "social_telegram": telegram, "social_whatsapp": whatsapp, "social_enabled": str(social_enabled).lower(), "social_campaign": campaign}):
+                st.success("تم حفظ روابط السوشال ميديا ومزامنتها مع التطبيق")
+    links = pd.DataFrame({"المنصة": ["Instagram", "Facebook", "Telegram", "WhatsApp"], "الرابط": [instagram, facebook, telegram, whatsapp], "الحالة": ["مفعّل" if value else "غير مضاف" for value in [instagram, facebook, telegram, whatsapp]]})
+    render_table(links, height=220)
 
 elif menu.startswith("🛠️"):
     page_header("🛠️ الدعم الفني", "أرسل ملاحظة أو طلب مساعدة إلى فريق تشغيل MyClicker Pro.")
