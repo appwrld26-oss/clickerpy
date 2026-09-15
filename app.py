@@ -735,9 +735,13 @@ elif menu.startswith("📢"):
     notification_enabled = st.toggle("تفعيل ظهور الإشعار داخل التطبيق", value=notification_config.get("notification_enabled", "true") == "true")
     if st.button("🚀 بث فوري للجميع", type="primary"):
         if message.strip():
-            run_query("UPDATE myapp.users_status SET notice_message = %s", (message.strip(),), is_select=False)
-            save_config({"notification_type": notification_type, "notice_message": message.strip(), "notification_enabled": str(notification_enabled).lower()})
-            st.success("تمت مزامنة الإشعار مع التطبيق وبثه للجميع")
+            users_saved = run_query("UPDATE myapp.users_status SET notice_message = %s", (message.strip(),), is_select=False)
+            current_version = int(notification_config.get("notification_version", "0") or 0)
+            config_saved = save_config({"notification_type": notification_type, "notice_message": message.strip(), "notification_enabled": str(notification_enabled).lower(), "notification_version": current_version + 1})
+            if users_saved is not None and config_saved:
+                st.success("تمت مزامنة الإشعار مع التطبيق وبثه للجميع")
+            else:
+                st.error("فشلت مزامنة الإشعار مع قاعدة البيانات؛ راجع اتصال قاعدة البيانات والصلاحيات")
         else:
             st.warning("اكتب رسالة قبل الإرسال")
 
@@ -747,7 +751,7 @@ elif menu.startswith("🚀"):
     with st.form("forced_update_form"):
         version = st.text_input("أحدث نسخة", value=config.get("latest_version", "7.2.8"))
         force_update = st.checkbox("تفعيل قفل النسخة", value=config.get("force_update") == "true")
-        apk_url = st.text_input("رابط APK", value=config.get("next_url", ""))
+        apk_url = st.text_input("رابط APK", value=config.get("next_url", "https://pub-7fc5f2f6fb34448f81ade9895014d897.r2.dev/v7.2.8.apk"))
         if st.form_submit_button("💾 تطبيق الإعدادات", type="primary"):
             if save_config({"latest_version": version, "force_update": str(force_update).lower(), "next_url": apk_url}):
                 st.success("تم حفظ إعدادات التحديث ومزامنتها مع التطبيق")
