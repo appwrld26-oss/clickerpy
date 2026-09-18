@@ -576,6 +576,9 @@ elif menu.startswith("👥"):
     search = st.text_input("🔍 ابحث برقم الهاتف أو معرّف الجهاز")
     base_query = """
         SELECT users_status.*,
+               nd.notification_version AS last_notification_version,
+               COALESCE(nd.delivery_status, 'لم تتم المزامنة') AS notification_delivery_status,
+               nd.delivered_at AS notification_received_at,
                CASE
                    WHEN last_active >= NOW() - INTERVAL '5 minutes'
                    THEN '🟢 Online'
@@ -588,11 +591,12 @@ elif menu.startswith("👥"):
                END AS bot_online,
                GREATEST(0, CEIL(EXTRACT(EPOCH FROM (expiry_date - NOW())) / 86400))::int AS days_remaining
         FROM myapp.users_status
-        WHERE device_id NOT LIKE 'sim_%%'
+        LEFT JOIN myapp.notification_delivery nd ON nd.device_id = users_status.device_id
+        WHERE users_status.device_id NOT LIKE 'sim_%%'
     """
     params: list[str] = []
     if search.strip():
-        base_query += " AND (phone ILIKE %s OR device_id ILIKE %s)"
+        base_query += " AND (users_status.phone ILIKE %s OR users_status.device_id ILIKE %s)"
         pattern = f"%{search.strip()}%"
         params.extend([pattern, pattern])
     base_query += " ORDER BY last_active DESC NULLS LAST LIMIT 100"
@@ -663,6 +667,7 @@ elif menu.startswith("👥"):
             "bot_connection", "phone", "device_id", "accepted_clicks",
             "app_version", "version_status", "status", "sub_tier", "last_active",
             "expiry_date", "days_remaining", "is_frozen", "notice_message",
+            "last_notification_version", "notification_delivery_status", "notification_received_at",
         ]
         visible_columns = [column for column in priority_columns if column in users.columns]
         visible_columns += [column for column in users.columns if column not in visible_columns and column != "bot_online"]
@@ -678,6 +683,9 @@ elif menu.startswith("👥"):
             "sub_tier": "الفئة",
             "last_active": "آخر نشاط",
             "expiry_date": "تاريخ الانتهاء",
+            "last_notification_version": "آخر إصدار إشعار",
+            "notification_delivery_status": "استلام الإشعار",
+            "notification_received_at": "وقت الاستلام المؤكد",
             "days_remaining": "الأيام المتبقية",
             "is_frozen": "مجمد؟",
             "notice_message": "رسالة التنبيه",
