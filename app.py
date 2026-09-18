@@ -417,6 +417,19 @@ def ensure_management_tables() -> None:
             commission NUMERIC(10,2) NOT NULL DEFAULT 0, active BOOLEAN NOT NULL DEFAULT TRUE,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )""",
+        """CREATE TABLE IF NOT EXISTS myapp.notification_delivery (
+            device_id TEXT PRIMARY KEY,
+            phone TEXT,
+            notification_version TEXT NOT NULL DEFAULT '0',
+            notification_id TEXT,
+            delivered_at TIMESTAMPTZ,
+            delivery_status TEXT NOT NULL DEFAULT 'offered',
+            last_sync_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        """ALTER TABLE myapp.notification_delivery
+           ADD COLUMN IF NOT EXISTS delivery_status TEXT NOT NULL DEFAULT 'offered'""",
+        """ALTER TABLE myapp.notification_delivery
+           ADD COLUMN IF NOT EXISTS delivered_at TIMESTAMPTZ""",
     ]
     for statement in statements:
         run_query(statement, is_select=False)
