@@ -682,10 +682,14 @@ elif menu.startswith("👥"):
         required_key = version_key(required_version)
         users["version_status"] = users["app_version"].map(lambda value: "✅ محدث" if version_key(value) == required_key else "⚠️ يحتاج مزامنة")
         st.markdown("### ⚡ التفعيل الجماعي والاشتراكات")
+        activation_options = users["device_id"].astype(str).tolist()
+        saved_activation_ids = [device_id for device_id in st.session_state.get("activation_device_ids", []) if device_id in activation_options]
         activation_ids = st.multiselect(
             "اختر الأجهزة المطلوب تفعيلها",
-            options=users["device_id"].astype(str).tolist(),
+            options=activation_options,
+            default=saved_activation_ids,
             format_func=lambda value: f"{value} — {users.loc[users['device_id'].astype(str) == value, 'phone'].iloc[0] if not users.loc[users['device_id'].astype(str) == value].empty else value}",
+            key="activation_device_ids",
         )
         activation_col1, activation_col2 = st.columns(2)
         with activation_col1:
@@ -880,7 +884,7 @@ elif menu.startswith("📢"):
         device_rows = run_query("SELECT device_id, phone FROM myapp.users_status ORDER BY last_active DESC")
         if device_rows is not None and not device_rows.empty:
             device_options = device_rows["device_id"].astype(str).tolist()
-            selected_device_id = st.selectbox("اختر الجهاز", device_options, format_func=lambda device: f"{device} — {device_rows.loc[device_rows['device_id'].astype(str) == device, 'phone'].iloc[0] if not device_rows.loc[device_rows['device_id'].astype(str) == device, 'phone'].empty else 'بلا هاتف'}")
+            selected_device_id = st.selectbox("اختر الجهاز", device_options, format_func=lambda device: f"{device} — {device_rows.loc[device_rows['device_id'].astype(str) == device, 'phone'].iloc[0] if not device_rows.loc[device_rows['device_id'].astype(str) == device, 'phone'].empty else 'بلا هاتف'}", key="notification_selected_device")
         else:
             st.warning("لا توجد أجهزة مسجلة للإرسال الفردي")
     message = st.text_area("نص الرسالة المنسدلة", value=notification_config.get("notice_message", ""), height=140, placeholder="اكتب الإعلان أو التنبيه هنا...")
