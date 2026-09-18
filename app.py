@@ -733,11 +733,19 @@ elif menu.startswith("📢"):
     notification_type = st.selectbox("نوع الإشعار", ["إعلان عام", "تنبيه مهم", "تحديث التطبيق", "انتهاء الاشتراك"], index=["إعلان عام", "تنبيه مهم", "تحديث التطبيق", "انتهاء الاشتراك"].index(notification_config.get("notification_type", "إعلان عام")) if notification_config.get("notification_type", "إعلان عام") in ["إعلان عام", "تنبيه مهم", "تحديث التطبيق", "انتهاء الاشتراك"] else 0)
     message = st.text_area("نص الرسالة المنسدلة", value=notification_config.get("notice_message", ""), height=140, placeholder="اكتب الإعلان أو التنبيه هنا...")
     notification_enabled = st.toggle("تفعيل ظهور الإشعار داخل التطبيق", value=notification_config.get("notification_enabled", "true") == "true")
+    notification_peak_only = st.toggle("إرسال الإشعار للكباتن أثناء وقت الذروة فقط", value=notification_config.get("notification_peak_only", "false") == "true")
+    peak_days = st.multiselect("أيام الذروة", options=list(range(7)), default=[int(day) for day in notification_config.get("peak_days", "0,1,2,3,4,5,6").split(",") if day.strip().isdigit() and 0 <= int(day) <= 6], format_func=lambda day: ["الإثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت", "الأحد"][day])
+    peak_col1, peak_col2 = st.columns(2)
+    with peak_col1:
+        peak_start = st.time_input("بداية الذروة", value=datetime.strptime(notification_config.get("peak_start", "18:00"), "%H:%M").time())
+    with peak_col2:
+        peak_end = st.time_input("نهاية الذروة", value=datetime.strptime(notification_config.get("peak_end", "23:00"), "%H:%M").time())
+    st.caption("يستخدم التطبيق يوم الأسبوع والوقت المحلي المرسل في طلب المزامنة لتحديد وقت الذروة.")
     if st.button("🚀 بث فوري للجميع", type="primary"):
         if message.strip():
             users_saved = run_query("UPDATE myapp.users_status SET notice_message = %s", (message.strip(),), is_select=False)
             current_version = int(notification_config.get("notification_version", "0") or 0)
-            config_saved = save_config({"notification_type": notification_type, "notice_message": message.strip(), "notification_enabled": str(notification_enabled).lower(), "notification_version": current_version + 1})
+            config_saved = save_config({"notification_type": notification_type, "notice_message": message.strip(), "notification_enabled": str(notification_enabled).lower(), "notification_version": current_version + 1, "notification_peak_only": str(notification_peak_only).lower(), "peak_days": ",".join(str(day) for day in sorted(peak_days)), "peak_start": peak_start.strftime("%H:%M"), "peak_end": peak_end.strftime("%H:%M")})
             if users_saved is not None and config_saved:
                 st.success("تمت مزامنة الإشعار مع التطبيق وبثه للجميع")
             else:
@@ -897,6 +905,19 @@ elif menu.startswith("🤝"):
 
 elif menu.startswith("⏱️"):
     page_header("⏱️ وقت الذروة والنشاط", "حدد الساعات والأيام التي تسجل أعلى نشاط ونقرات.")
+    peak_config = fetch_config()
+    st.markdown("### ⚙️ جدولة وقت الذروة")
+    with st.form("peak_schedule_form"):
+        schedule_days = st.multiselect("الأيام النشطة", options=list(range(7)), default=[int(day) for day in peak_config.get("peak_days", "0,1,2,3,4,5,6").split(",") if day.strip().isdigit() and 0 <= int(day) <= 6], format_func=lambda day: ["الإثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت", "الأحد"][day], key="schedule_days")
+        schedule_col1, schedule_col2 = st.columns(2)
+        with schedule_col1:
+            schedule_start = st.time_input("من الساعة", value=datetime.strptime(peak_config.get("peak_start", "18:00"), "%H:%M").time(), key="schedule_start")
+        with schedule_col2:
+            schedule_end = st.time_input("إلى الساعة", value=datetime.strptime(peak_config.get("peak_end", "23:00"), "%H:%M").time(), key="schedule_end")
+        if st.form_submit_button("💾 حفظ جدول الذروة", type="primary"):
+            if save_config({"peak_days": ",".join(str(day) for day in sorted(schedule_days)), "peak_start": schedule_start.strftime("%H:%M"), "peak_end": schedule_end.strftime("%H:%M")}):
+                st.success("تم حفظ أيام وساعات الذروة ومزامنتها مع التطبيق")
+    st.info(f"الجدول الحالي: {peak_config.get('peak_start', '18:00')} — {peak_config.get('peak_end', '23:00')} | الأيام: {peak_config.get('peak_days', '0,1,2,3,4,5,6')}")
     peak = run_query("SELECT EXTRACT(HOUR FROM last_active)::int AS hour, COUNT(*) AS devices, COALESCE(SUM(accepted_clicks), 0) AS clicks FROM myapp.users_status WHERE last_active IS NOT NULL GROUP BY 1 ORDER BY 1")
     if peak is not None and not peak.empty:
         peak["الساعة"] = peak["hour"].map(lambda hour: f"{int(hour):02d}:00")
