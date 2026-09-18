@@ -546,6 +546,7 @@ if menu.startswith("📈"):
                COUNT(*) FILTER (WHERE last_active >= NOW() - INTERVAL '5 minutes') AS online,
                COUNT(*) FILTER (WHERE last_active IS NULL OR last_active < NOW() - INTERVAL '5 minutes') AS offline
         FROM myapp.users_status
+        WHERE device_id NOT LIKE 'sim_%%'
         """
     )
     if summary is not None and not summary.empty:
@@ -601,6 +602,7 @@ if menu.startswith("📈"):
         """
         SELECT COALESCE(app_version, 'غير معروف') AS app_version, COUNT(*) AS devices
         FROM myapp.users_status
+        WHERE device_id NOT LIKE 'sim_%%'
         GROUP BY app_version
         ORDER BY devices DESC
         """
@@ -627,6 +629,18 @@ elif menu.startswith("👥"):
     required_version = version_config.get("latest_version", "7.2.8")
     st.caption(f"النسخة المطلوبة حالياً: **v{required_version}** — تتم مقارنة كل مستخدم ومزامنته مع هذه النسخة.")
     search = st.text_input("🔍 ابحث برقم الهاتف أو معرّف الجهاز")
+    count_query = "SELECT COUNT(*) AS total FROM myapp.users_status WHERE device_id NOT LIKE 'sim_%%'"
+    count_params: list[str] = []
+    if search.strip():
+        count_query += " AND (phone ILIKE %s OR device_id ILIKE %s)"
+        count_pattern = f"%{search.strip()}%"
+        count_params.extend([count_pattern, count_pattern])
+    total_result = run_query(count_query, count_params)
+    total_devices = int(total_result.iloc[0]["total"]) if total_result is not None and not total_result.empty else 0
+    page_size = st.selectbox("عدد الأجهزة في الصفحة", [50, 100, 250], index=1, key="fleet_page_size")
+    total_pages = max(1, (total_devices + page_size - 1) // page_size)
+    page_number = st.number_input("صفحة الأسطول", min_value=1, max_value=total_pages, value=1, step=1, key="fleet_page_number")
+    st.info(f"إجمالي الأجهزة المطابقة: **{total_devices}** | الصفحة **{page_number}** من **{total_pages}** | يتم احتساب Online/Offline من كامل قاعدة البيانات.")
     base_query = """
         SELECT users_status.*,
                nd.notification_version AS last_notification_version,
@@ -652,7 +666,8 @@ elif menu.startswith("👥"):
         base_query += " AND (users_status.phone ILIKE %s OR users_status.device_id ILIKE %s)"
         pattern = f"%{search.strip()}%"
         params.extend([pattern, pattern])
-    base_query += " ORDER BY last_active DESC NULLS LAST LIMIT 100"
+    base_query += " ORDER BY last_active DESC NULLS LAST LIMIT %s OFFSET %s"
+    params.extend([int(page_size), (int(page_number) - 1) * int(page_size)])
     users = run_query(base_query, params)
 
     if users is None or users.empty:
