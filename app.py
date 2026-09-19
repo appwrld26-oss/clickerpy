@@ -737,6 +737,8 @@ elif menu.startswith("👥"):
             key="activation_device_ids",
         )
         activation_col1, activation_col2 = st.columns(2)
+        subscription_tier = st.selectbox("نوع الاشتراك الشامل", ["VIP", "STANDARD", "TRIAL"], key="bulk_subscription_tier")
+        subscription_days = st.number_input("مدة الاشتراك الشامل بالأيام", min_value=1, max_value=3650, value=30, step=1, key="bulk_subscription_days")
         with activation_col1:
             free_enabled = version_config.get("free_activation_enabled", "true") == "true"
             if st.button("⛔ إيقاف التفعيل المجاني الجماعي" if free_enabled else "✅ تفعيل المجاني الجماعي", type="secondary"):
@@ -746,16 +748,30 @@ elif menu.startswith("👥"):
                 run_query("UPDATE myapp.users_status SET status='Active', expiry_date=NOW() + INTERVAL '30 days' WHERE device_id = ANY(%s)", (activation_ids,), is_select=False)
                 st.success(f"تم تفعيل {len(activation_ids)} جهاز مجاناً لمدة 30 يوماً")
                 st.rerun()
+            if st.button("⛔ إيقاف المجاني + 💳 تفعيل الشامل للمحدد", disabled=not activation_ids, key="disable_free_activate_selected"):
+                result = run_query(
+                    """UPDATE myapp.users_status
+                          SET status='Active', sub_tier=%s,
+                              expiry_date=GREATEST(COALESCE(expiry_date, NOW()), NOW()) + (%s || ' days')::interval,
+                              is_frozen=FALSE
+                        WHERE device_id = ANY(%s)""",
+                    (subscription_tier, int(subscription_days), activation_ids),
+                    is_select=False,
+                )
+                if result is not None:
+                    st.toast(f"تم إيقاف المجاني وتفعيل الشامل لـ {len(activation_ids)} جهاز", icon="💳")
+                    st.rerun()
         with activation_col2:
-            subscription_tier = st.selectbox("نوع الاشتراك", ["VIP", "STANDARD", "TRIAL"], key="bulk_subscription_tier")
             if st.button("💳 تفعيل الاشتراكات المحددة", disabled=not activation_ids, type="primary"):
                 run_query("UPDATE myapp.users_status SET status='Active', sub_tier=%s, expiry_date=NOW() + INTERVAL '30 days' WHERE device_id = ANY(%s)", (subscription_tier, activation_ids), is_select=False)
                 st.success(f"تم تفعيل اشتراك {subscription_tier} لـ {len(activation_ids)} جهاز")
                 st.rerun()
-        if st.button("💳 تفعيل النظام الشامل لجميع الأجهزة", type="primary"):
-            result = run_query("UPDATE myapp.users_status SET status='Active', sub_tier=%s, expiry_date=NOW() + INTERVAL '30 days' WHERE device_id NOT LIKE 'sim_%%'", (subscription_tier,), is_select=False)
+        confirm_all_subscription = st.checkbox("أؤكد إيقاف المجاني وتفعيل الاشتراك الشامل لكل الأجهزة الحقيقية", key="confirm_all_subscription")
+        if st.button("⛔ إيقاف المجاني + 💳 تفعيل الشامل للجميع", type="primary", disabled=not confirm_all_subscription, key="global_comprehensive_subscription"):
+            result = run_query("UPDATE myapp.users_status SET status='Active', sub_tier=%s, expiry_date=GREATEST(COALESCE(expiry_date, NOW()), NOW()) + (%s || ' days')::interval, is_frozen=FALSE WHERE device_id NOT LIKE 'sim_%%'", (subscription_tier, int(subscription_days)), is_select=False)
             if result is not None:
-                st.success(f"تم تفعيل الاشتراك الشامل {subscription_tier} لجميع الأجهزة لمدة 30 يوماً")
+                st.success(f"تم إيقاف المجاني وتفعيل الاشتراك الشامل {subscription_tier} لجميع الأجهزة الحقيقية لمدة {int(subscription_days)} يوماً")
+                st.toast("تم تفعيل نظام الاشتراكات الشامل للجميع", icon="💳")
                 st.rerun()
         if st.button("🔄 مزامنة الإصدار للأجهزة المحددة", disabled=not activation_ids):
             result = run_query("UPDATE myapp.users_status SET app_version=%s WHERE device_id = ANY(%s)", (required_version, activation_ids), is_select=False)
@@ -899,17 +915,21 @@ elif menu.startswith("👥"):
                             st.rerun()
                 with col6:
                     st.write("**الاشتراك المجاني الفردي**")
+                    individual_subscription_tier = st.selectbox("فئة الاشتراك الشامل", ["VIP", "STANDARD", "TRIAL"], key=f"individual_subscription_tier_{device_id}")
+                    individual_subscription_days = st.number_input("مدة الاشتراك بالأيام", min_value=1, max_value=3650, value=30, step=1, key=f"individual_subscription_days_{device_id}")
                     confirm_free_disable = st.checkbox("تأكيد الإيقاف", key=f"confirm_free_disable_{device_id}")
-                    if st.button("⛔ إيقاف الاشتراك المجاني الفردي", key=f"disable_free_{device_id}", disabled=not confirm_free_disable):
+                    if st.button("⛔ إيقاف المجاني + 💳 تفعيل الشامل", key=f"disable_free_{device_id}", disabled=not confirm_free_disable):
                         result = run_query(
                             """UPDATE myapp.users_status
-                                  SET status='Blocked', expiry_date=NOW(), is_frozen=TRUE
+                                  SET status='Active', sub_tier=%s,
+                                      expiry_date=GREATEST(COALESCE(expiry_date, NOW()), NOW()) + (%s || ' days')::interval,
+                                      is_frozen=FALSE
                                 WHERE device_id=%s""",
-                            (device_id,),
+                            (individual_subscription_tier, int(individual_subscription_days), device_id),
                             is_select=False,
                         )
                         if result is not None:
-                            st.toast(f"تم تعطيل الاشتراك المجاني للجهاز {device_id}", icon="⛔")
+                            st.toast(f"تم إيقاف المجاني وتفعيل الاشتراك الشامل للجهاز {device_id}", icon="💳")
                             st.rerun()
                 with col7:
                     st.write("**الإصدار**")
