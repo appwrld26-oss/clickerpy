@@ -399,6 +399,21 @@ def send_notification_to_api(message: str, notification_type: str, device_ids: l
         return False, f"تعذر إرسال الإشعار إلى API: {error}"
 
 
+def check_sync_api() -> tuple[bool, str]:
+    """Check the public Node.js health route without sending database credentials."""
+    api_url = str(st.session_state.get("sync_api_url", os.getenv("MYCLICKER_SYNC_API_URL", ""))).strip().rstrip("/")
+    if not api_url:
+        return False, "أدخل رابط API أولاً"
+    try:
+        with urllib.request.urlopen(f"{api_url}/health", timeout=8) as response:
+            body = json.loads(response.read().decode("utf-8"))
+        if body.get("status") == "ok":
+            return True, f"الخادم يعمل: {body.get('service', 'myclicker-sync')}"
+        return False, "الخادم ردّ بحالة غير جاهزة"
+    except (urllib.error.URLError, TimeoutError, ValueError) as error:
+        return False, f"تعذر فحص الخادم: {error}"
+
+
 def ensure_management_tables() -> None:
     """Create optional management tables without changing existing connection paths."""
     statements = [
@@ -924,6 +939,20 @@ elif menu.startswith("📢"):
             else:
                 st.toast("أدخل رابط API والمفتاح معاً", icon="⚠️")
                 st.warning("أدخل الرابط والمفتاح معاً")
+    with st.expander("🛰️ حالة تكامل السيرفر والمسارات", expanded=False):
+        route_table = pd.DataFrame([
+            ["فحص الخادم", "GET /health", "بدون مفتاح"],
+            ["مزامنة Android", "POST /api/sync", "X-MyClicker-Key"],
+            ["إرسال إشعار", "POST /api/admin/notification/send", "X-MyClicker-Key"],
+            ["تأكيد الاستلام", "POST /api/notification/ack", "X-MyClicker-Key"],
+            ["تفعيل اشتراك", "POST /api/subscriptions/activate", "X-MyClicker-Key"],
+            ["تحديث حي", "POST /api/admin/live-config", "X-MyClicker-Key"],
+        ], columns=["الوظيفة", "المسار", "الحماية"])
+        render_table(route_table, height=245)
+        if st.button("🔎 فحص اتصال خادم Node.js", key="check_node_health"):
+            api_ok, api_message = check_sync_api()
+            (st.success if api_ok else st.error)(api_message)
+            st.toast(api_message, icon="✅" if api_ok else "❌")
     notification_type = st.selectbox("نوع الإشعار", ["إعلان عام", "تنبيه مهم", "تحديث التطبيق", "انتهاء الاشتراك"], index=["إعلان عام", "تنبيه مهم", "تحديث التطبيق", "انتهاء الاشتراك"].index(notification_config.get("notification_type", "إعلان عام")) if notification_config.get("notification_type", "إعلان عام") in ["إعلان عام", "تنبيه مهم", "تحديث التطبيق", "انتهاء الاشتراك"] else 0)
     delivery_mode = st.radio("نطاق الإرسال", ["جماعي — جميع الأجهزة", "فردي — جهاز واحد"], horizontal=True)
     selected_device_id = None
@@ -1071,6 +1100,8 @@ elif menu.startswith("📊"):
 
 elif menu.startswith("💳"):
     page_header("💳 إدارة الأكواد", "إنشاء أكواد تفعيل حسب الأيام والفئة، وتتبع جهاز النسخ والتفعيل وإعادة الترتيب.")
+    st.info("🔗 كل كود جديد يُحفظ في myapp.subscriptions ويعمل مباشرة عبر POST /api/subscriptions/activate وPOST /api/verify-code.")
+    section_title("1️⃣ مولّد الأكواد")
     generator_col1, generator_col2, generator_col3 = st.columns(3)
     with generator_col1:
         quantity = st.number_input("عدد الأكواد", min_value=1, max_value=500, value=5, step=1, key="code_quantity")
@@ -1106,6 +1137,7 @@ elif menu.startswith("💳"):
             st.error("تم إيقاف اعتماد الأكواد لأن جدول الاشتراكات غير متاح")
     generated_codes = st.session_state.get("generated_codes", [])
     if generated_codes:
+        section_title(f"2️⃣ الأكواد الناتجة ({len(generated_codes)})")
         generated_audit = run_query(
             """SELECT code, category, duration_days, status, copied_by_device_id, reorder_count, created_at
                  FROM myapp.activation_codes_audit
@@ -1129,7 +1161,7 @@ elif menu.startswith("💳"):
             st.success("تم تحديث عداد إعادة الترتيب للأكواد المحددة")
             st.rerun()
         st.download_button("📥 تنزيل الأكواد CSV", codes_frame.to_csv(index=False).encode("utf-8-sig"), "myclicker_codes.csv", "text/csv")
-    section_title("🧾 سجل حركة الأكواد")
+    section_title("3️⃣ جدول سجل حركة الأكواد")
     code_search = st.text_input("🔍 ابحث عن كود أو موظف أو جهاز", key="code_audit_search")
     audit_query = "SELECT code, category, duration_days, status, employee_name, action, device_id, activated_device_id, copied_by_device_id, reorder_count, created_at, action_at FROM myapp.activation_codes_audit"
     audit_params: list[str] = []
@@ -1144,7 +1176,7 @@ elif menu.startswith("💳"):
         render_table(audit, height=360)
     else:
         st.info("لا يوجد سجل حركة للأكواد بعد.")
-    st.markdown("### 📝 تسجيل حركة كود")
+    section_title("4️⃣ تسجيل حركة يدوية")
     action_code = st.text_input("الكود", key="action_code")
     action_type = st.selectbox("نوع الحركة", ["copied", "transferred", "used"], format_func=lambda value: {"copied": "تم نسخه", "transferred": "تم نقله", "used": "تم استخدامه"}[value], key="action_type")
     action_device = st.text_input("الجهاز المستخدم أو المستلم", key="action_device")
