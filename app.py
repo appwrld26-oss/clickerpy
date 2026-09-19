@@ -1065,7 +1065,16 @@ elif menu.startswith("💳"):
     if st.button("🎟️ توليد أكواد جديدة", type="primary"):
         codes = [hashlib.sha256(f"{time.time_ns()}-{index}".encode()).hexdigest()[:12].upper() for index in range(int(quantity))]
         st.session_state.generated_codes = codes
+        all_subscriptions_saved = True
         for code in codes:
+            subscription_saved = run_query(
+                """INSERT INTO myapp.subscriptions (code, duration_days, category, is_used)
+                   VALUES (%s, %s, %s, FALSE)
+                   ON CONFLICT (code) DO NOTHING""",
+                (code, int(code_days), code_category),
+                is_select=False,
+            )
+            all_subscriptions_saved = all_subscriptions_saved and subscription_saved is not None
             run_query(
                 """INSERT INTO myapp.activation_codes_audit
                     (code, category, duration_days, employee_name, action, copied_by_device_id)
@@ -1073,7 +1082,11 @@ elif menu.startswith("💳"):
                 (code, code_category, int(code_days), st.session_state.get("staff_name", "المدير العام"), generator_copy_device.strip() or None),
                 is_select=False,
             )
-        st.success(f"تم توليد {len(codes)} أكواد")
+        if all_subscriptions_saved:
+            st.success(f"تم توليد {len(codes)} أكواد وربطها بمسار التحقق Android")
+            st.toast("أكواد التفعيل جاهزة للاستخدام", icon="🎟️")
+        else:
+            st.error("تم إيقاف اعتماد الأكواد لأن جدول الاشتراكات غير متاح")
     generated_codes = st.session_state.get("generated_codes", [])
     if generated_codes:
         generated_audit = run_query(
