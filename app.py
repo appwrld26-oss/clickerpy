@@ -414,6 +414,31 @@ def check_sync_api() -> tuple[bool, str]:
         return False, f"تعذر فحص الخادم: {error}"
 
 
+def end_free_subscription(device_ids: list[str]) -> bool:
+    """End free access and send devices back to the Android activation screen."""
+    if not device_ids:
+        return False
+    result = run_query(
+        """UPDATE myapp.users_status
+              SET status='Expired', sub_tier=NULL, expiry_date=NOW(),
+                  is_frozen=FALSE, notice_message=NULL
+            WHERE device_id = ANY(%s)""",
+        (device_ids,),
+        is_select=False,
+    )
+    if result is None:
+        return False
+    for device_id in device_ids:
+        run_query(
+            """INSERT INTO myapp.activation_codes_audit
+                (code, category, duration_days, status, action, device_id, activated_device_id, employee_name)
+               VALUES ('FREE_ACCESS', 'FREE', 0, 'ended', 'free_ended', %s, %s, %s)""",
+            (device_id, device_id, st.session_state.get("staff_name", "المدير العام")),
+            is_select=False,
+        )
+    return True
+
+
 def ensure_management_tables() -> None:
     """Create optional management tables without changing existing connection paths."""
     statements = [
@@ -436,10 +461,15 @@ def ensure_management_tables() -> None:
         """ALTER TABLE myapp.activation_codes_audit ADD COLUMN IF NOT EXISTS reorder_count INTEGER NOT NULL DEFAULT 0""",
         """CREATE TABLE IF NOT EXISTS myapp.subscriptions (
             code TEXT PRIMARY KEY, duration_days INTEGER NOT NULL DEFAULT 30,
-            category TEXT NOT NULL DEFAULT 'STANDARD', is_used BOOLEAN NOT NULL DEFAULT FALSE,
+            category TEXT NOT NULL DEFAULT 'STANDARD', payment_status TEXT NOT NULL DEFAULT 'pending',
+            renewal_status TEXT NOT NULL DEFAULT 'new', renewed_at TIMESTAMPTZ,
+            is_used BOOLEAN NOT NULL DEFAULT FALSE,
             used_by_device TEXT, used_at TIMESTAMPTZ
         )""",
         """ALTER TABLE myapp.subscriptions ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT 'STANDARD'""",
+        """ALTER TABLE myapp.subscriptions ADD COLUMN IF NOT EXISTS payment_status TEXT NOT NULL DEFAULT 'pending'""",
+        """ALTER TABLE myapp.subscriptions ADD COLUMN IF NOT EXISTS renewal_status TEXT NOT NULL DEFAULT 'new'""",
+        """ALTER TABLE myapp.subscriptions ADD COLUMN IF NOT EXISTS renewed_at TIMESTAMPTZ""",
         """CREATE TABLE IF NOT EXISTS myapp.partners (
             id BIGSERIAL PRIMARY KEY, name TEXT UNIQUE NOT NULL, category TEXT NOT NULL DEFAULT 'STANDARD',
             commission NUMERIC(10,2) NOT NULL DEFAULT 0, active BOOLEAN NOT NULL DEFAULT TRUE,
@@ -748,30 +778,22 @@ elif menu.startswith("👥"):
                 run_query("UPDATE myapp.users_status SET status='Active', expiry_date=NOW() + INTERVAL '30 days' WHERE device_id = ANY(%s)", (activation_ids,), is_select=False)
                 st.success(f"تم تفعيل {len(activation_ids)} جهاز مجاناً لمدة 30 يوماً")
                 st.rerun()
-            if st.button("⛔ إيقاف المجاني + 💳 تفعيل الشامل للمحدد", disabled=not activation_ids, key="disable_free_activate_selected"):
-                result = run_query(
-                    """UPDATE myapp.users_status
-                          SET status='Active', sub_tier=%s,
-                              expiry_date=GREATEST(COALESCE(expiry_date, NOW()), NOW()) + (%s || ' days')::interval,
-                              is_frozen=FALSE
-                        WHERE device_id = ANY(%s)""",
-                    (subscription_tier, int(subscription_days), activation_ids),
-                    is_select=False,
-                )
-                if result is not None:
-                    st.toast(f"تم إيقاف المجاني وتفعيل الشامل لـ {len(activation_ids)} جهاز", icon="💳")
+            if st.button("⛔ إنهاء المجاني وإلزام الكود للمحدد", disabled=not activation_ids, key="disable_free_activate_selected"):
+                if end_free_subscription(activation_ids):
+                    st.toast(f"انتهى المجاني لـ {len(activation_ids)} جهاز وعادت إلى واجهة إدخال الكود", icon="🔐")
                     st.rerun()
         with activation_col2:
             if st.button("💳 تفعيل الاشتراكات المحددة", disabled=not activation_ids, type="primary"):
                 run_query("UPDATE myapp.users_status SET status='Active', sub_tier=%s, expiry_date=NOW() + INTERVAL '30 days' WHERE device_id = ANY(%s)", (subscription_tier, activation_ids), is_select=False)
                 st.success(f"تم تفعيل اشتراك {subscription_tier} لـ {len(activation_ids)} جهاز")
                 st.rerun()
-        confirm_all_subscription = st.checkbox("أؤكد إيقاف المجاني وتفعيل الاشتراك الشامل لكل الأجهزة الحقيقية", key="confirm_all_subscription")
-        if st.button("⛔ إيقاف المجاني + 💳 تفعيل الشامل للجميع", type="primary", disabled=not confirm_all_subscription, key="global_comprehensive_subscription"):
-            result = run_query("UPDATE myapp.users_status SET status='Active', sub_tier=%s, expiry_date=GREATEST(COALESCE(expiry_date, NOW()), NOW()) + (%s || ' days')::interval, is_frozen=FALSE WHERE device_id NOT LIKE 'sim_%%'", (subscription_tier, int(subscription_days)), is_select=False)
-            if result is not None:
-                st.success(f"تم إيقاف المجاني وتفعيل الاشتراك الشامل {subscription_tier} لجميع الأجهزة الحقيقية لمدة {int(subscription_days)} يوماً")
-                st.toast("تم تفعيل نظام الاشتراكات الشامل للجميع", icon="💳")
+        confirm_all_subscription = st.checkbox("أؤكد إنهاء المجاني وإلزام إدخال كود مدفوع لكل الأجهزة الحقيقية", key="confirm_all_subscription")
+        if st.button("⛔ إنهاء المجاني وإلزام الكود للجميع", type="primary", disabled=not confirm_all_subscription, key="global_comprehensive_subscription"):
+            all_devices = run_query("SELECT device_id FROM myapp.users_status WHERE device_id NOT LIKE 'sim_%%'")
+            all_device_ids = all_devices["device_id"].astype(str).tolist() if all_devices is not None and not all_devices.empty else []
+            if end_free_subscription(all_device_ids):
+                st.success(f"تم إنهاء المجاني لـ {len(all_device_ids)} جهاز وإعادتهم إلى واجهة إدخال الكود")
+                st.toast("أصبح تفعيل الاشتراك المدفوع إلزامياً عبر الكود", icon="🔐")
                 st.rerun()
         if st.button("🔄 مزامنة الإصدار للأجهزة المحددة", disabled=not activation_ids):
             result = run_query("UPDATE myapp.users_status SET app_version=%s WHERE device_id = ANY(%s)", (required_version, activation_ids), is_select=False)
@@ -915,21 +937,11 @@ elif menu.startswith("👥"):
                             st.rerun()
                 with col6:
                     st.write("**الاشتراك المجاني الفردي**")
-                    individual_subscription_tier = st.selectbox("فئة الاشتراك الشامل", ["VIP", "STANDARD", "TRIAL"], key=f"individual_subscription_tier_{device_id}")
-                    individual_subscription_days = st.number_input("مدة الاشتراك بالأيام", min_value=1, max_value=3650, value=30, step=1, key=f"individual_subscription_days_{device_id}")
+                    st.caption("بعد الإنهاء سيعود الجهاز إلى واجهة إدخال كود اشتراك مدفوع.")
                     confirm_free_disable = st.checkbox("تأكيد الإيقاف", key=f"confirm_free_disable_{device_id}")
-                    if st.button("⛔ إيقاف المجاني + 💳 تفعيل الشامل", key=f"disable_free_{device_id}", disabled=not confirm_free_disable):
-                        result = run_query(
-                            """UPDATE myapp.users_status
-                                  SET status='Active', sub_tier=%s,
-                                      expiry_date=GREATEST(COALESCE(expiry_date, NOW()), NOW()) + (%s || ' days')::interval,
-                                      is_frozen=FALSE
-                                WHERE device_id=%s""",
-                            (individual_subscription_tier, int(individual_subscription_days), device_id),
-                            is_select=False,
-                        )
-                        if result is not None:
-                            st.toast(f"تم إيقاف المجاني وتفعيل الاشتراك الشامل للجهاز {device_id}", icon="💳")
+                    if st.button("⛔ إنهاء المجاني وإلزام الكود", key=f"disable_free_{device_id}", disabled=not confirm_free_disable):
+                        if end_free_subscription([device_id]):
+                            st.toast(f"انتهى المجاني للجهاز {device_id} وعاد إلى واجهة إدخال الكود", icon="🔐")
                             st.rerun()
                 with col7:
                     st.write("**الإصدار**")
@@ -1142,8 +1154,9 @@ elif menu.startswith("💳"):
         all_subscriptions_saved = True
         for code in codes:
             subscription_saved = run_query(
-                """INSERT INTO myapp.subscriptions (code, duration_days, category, is_used)
-                   VALUES (%s, %s, %s, FALSE)
+                """INSERT INTO myapp.subscriptions
+                   (code, duration_days, category, payment_status, renewal_status, is_used)
+                   VALUES (%s, %s, %s, 'pending', 'new', FALSE)
                    ON CONFLICT (code) DO NOTHING""",
                 (code, int(code_days), code_category),
                 is_select=False,
@@ -1189,8 +1202,9 @@ elif menu.startswith("💳"):
         st.download_button("📥 تنزيل الأكواد CSV", codes_frame.to_csv(index=False).encode("utf-8-sig"), "myclicker_codes.csv", "text/csv")
     section_title("3️⃣ جداول حالة الأكواد")
     subscription_status = run_query(
-        """SELECT s.code, s.category, s.duration_days, s.is_used, s.used_by_device,
-                  s.used_at, a.activated_device_id, a.copied_by_device_id,
+        """SELECT s.code, s.category, s.duration_days, s.is_used,
+                  s.payment_status, s.renewal_status, s.used_by_device,
+                  s.used_at, s.renewed_at, a.activated_device_id, a.copied_by_device_id,
                   a.employee_name, a.action_at
              FROM myapp.subscriptions s
              LEFT JOIN LATERAL (
@@ -1207,7 +1221,8 @@ elif menu.startswith("💳"):
         subscription_status["جهاز التفعيل"] = subscription_status["used_by_device"].fillna(subscription_status["activated_device_id"]).fillna("—")
         subscription_status = subscription_status.rename(columns={
             "code": "كود التفعيل", "category": "الفئة", "duration_days": "الأيام",
-            "used_at": "وقت الاستخدام", "copied_by_device_id": "جهاز النسخ",
+            "payment_status": "الدفع", "renewal_status": "حالة التجديد",
+            "used_at": "وقت الاستخدام", "renewed_at": "وقت التجديد", "copied_by_device_id": "جهاز النسخ",
             "employee_name": "الموظف", "action_at": "وقت تسجيل التفعيل",
         })
         status_sort_options = ["وقت الاستخدام", "كود التفعيل", "الفئة", "الأيام", "جهاز التفعيل", "جهاز النسخ", "الموظف"]
@@ -1221,7 +1236,7 @@ elif menu.startswith("💳"):
             with status_tab:
                 status_frame = subscription_status if status_value is None else subscription_status[subscription_status["is_used"] == status_value]
                 status_frame = status_frame.sort_values(status_sort, ascending=not descending, na_position="last")
-                display_columns = ["كود التفعيل", "الفئة", "الأيام", "حالة الكود", "جهاز التفعيل", "جهاز النسخ", "الموظف", "وقت الاستخدام"]
+                display_columns = ["كود التفعيل", "الفئة", "الأيام", "حالة الكود", "الدفع", "حالة التجديد", "جهاز التفعيل", "جهاز النسخ", "الموظف", "وقت الاستخدام", "وقت التجديد"]
                 render_table(status_frame[display_columns], height=300)
                 st.caption(f"العدد: {len(status_frame)}")
     else:
