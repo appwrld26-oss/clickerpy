@@ -935,7 +935,7 @@ elif menu.startswith("📢"):
             target_ids = [selected_device_id] if delivery_mode.startswith("فردي") and selected_device_id else []
             users_saved = run_query("UPDATE myapp.users_status SET notice_message = %s WHERE device_id = ANY(%s)", (message.strip(), target_ids), is_select=False) if target_ids else run_query("UPDATE myapp.users_status SET notice_message = %s", (message.strip(),), is_select=False)
             current_version = int(notification_config.get("notification_version", "0") or 0)
-            config_saved = save_config({"notification_type": notification_type, "notice_message": message.strip(), "notification_enabled": str(notification_enabled).lower(), "notification_version": current_version + 1, "notification_peak_only": str(notification_peak_only).lower(), "peak_days": ",".join(str(day) for day in sorted(peak_days)), "peak_start": peak_start.strftime("%H:%M"), "peak_end": peak_end.strftime("%H:%M")})
+            config_saved = save_config({"notification_type": notification_type, "notification_android_type": "notification", "notice_message": message.strip(), "notification_enabled": str(notification_enabled).lower(), "notification_version": current_version + 1, "notification_peak_only": str(notification_peak_only).lower(), "peak_days": ",".join(str(day) for day in sorted(peak_days)), "peak_start": peak_start.strftime("%H:%M"), "peak_end": peak_end.strftime("%H:%M")})
             if users_saved is not None and config_saved:
                 api_ok, api_message = send_notification_to_api(message.strip(), notification_type, target_ids)
                 delivery_label = "الفردي" if target_ids else "الجماعي"
