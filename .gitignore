@@ -1,0 +1,10 @@
+# Streamlit secrets
+.streamlit/secrets.toml
+
+# أي ملفات أسرار عامة
+**/secrets.toml
+
+# ملفات البيئة
+.env
+.env.*
+!.env.example
