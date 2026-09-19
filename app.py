@@ -434,6 +434,12 @@ def ensure_management_tables() -> None:
         """ALTER TABLE myapp.activation_codes_audit ADD COLUMN IF NOT EXISTS activated_device_id TEXT""",
         """ALTER TABLE myapp.activation_codes_audit ADD COLUMN IF NOT EXISTS copied_by_device_id TEXT""",
         """ALTER TABLE myapp.activation_codes_audit ADD COLUMN IF NOT EXISTS reorder_count INTEGER NOT NULL DEFAULT 0""",
+        """CREATE TABLE IF NOT EXISTS myapp.subscriptions (
+            code TEXT PRIMARY KEY, duration_days INTEGER NOT NULL DEFAULT 30,
+            category TEXT NOT NULL DEFAULT 'STANDARD', is_used BOOLEAN NOT NULL DEFAULT FALSE,
+            used_by_device TEXT, used_at TIMESTAMPTZ
+        )""",
+        """ALTER TABLE myapp.subscriptions ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT 'STANDARD'""",
         """CREATE TABLE IF NOT EXISTS myapp.partners (
             id BIGSERIAL PRIMARY KEY, name TEXT UNIQUE NOT NULL, category TEXT NOT NULL DEFAULT 'STANDARD',
             commission NUMERIC(10,2) NOT NULL DEFAULT 0, active BOOLEAN NOT NULL DEFAULT TRUE,
@@ -892,9 +898,9 @@ elif menu.startswith("👥"):
                             st.success(f"تمت إعادة تهيئة الجهاز {device_id}")
                             st.rerun()
                 with col6:
-                    st.write("**الاشتراك المجاني**")
+                    st.write("**الاشتراك المجاني الفردي**")
                     confirm_free_disable = st.checkbox("تأكيد الإيقاف", key=f"confirm_free_disable_{device_id}")
-                    if st.button("⛔ تعطيل المجاني", key=f"disable_free_{device_id}", disabled=not confirm_free_disable):
+                    if st.button("⛔ إيقاف الاشتراك المجاني الفردي", key=f"disable_free_{device_id}", disabled=not confirm_free_disable):
                         result = run_query(
                             """UPDATE myapp.users_status
                                   SET status='Blocked', expiry_date=NOW(), is_frozen=TRUE
@@ -1161,7 +1167,47 @@ elif menu.startswith("💳"):
             st.success("تم تحديث عداد إعادة الترتيب للأكواد المحددة")
             st.rerun()
         st.download_button("📥 تنزيل الأكواد CSV", codes_frame.to_csv(index=False).encode("utf-8-sig"), "myclicker_codes.csv", "text/csv")
-    section_title("3️⃣ جدول سجل حركة الأكواد")
+    section_title("3️⃣ جداول حالة الأكواد")
+    subscription_status = run_query(
+        """SELECT s.code, s.category, s.duration_days, s.is_used, s.used_by_device,
+                  s.used_at, a.activated_device_id, a.copied_by_device_id,
+                  a.employee_name, a.action_at
+             FROM myapp.subscriptions s
+             LEFT JOIN LATERAL (
+                 SELECT activated_device_id, copied_by_device_id, employee_name, action_at
+                   FROM myapp.activation_codes_audit
+                  WHERE code = s.code AND action = 'used'
+                  ORDER BY action_at DESC
+                  LIMIT 1
+             ) a ON TRUE
+            ORDER BY s.is_used DESC, COALESCE(s.used_at, TIMESTAMPTZ 'epoch') DESC, s.code"""
+    )
+    if subscription_status is not None and not subscription_status.empty:
+        subscription_status["حالة الكود"] = subscription_status["is_used"].map({True: "مستخدم", False: "غير مستخدم"})
+        subscription_status["جهاز التفعيل"] = subscription_status["used_by_device"].fillna(subscription_status["activated_device_id"]).fillna("—")
+        subscription_status = subscription_status.rename(columns={
+            "code": "كود التفعيل", "category": "الفئة", "duration_days": "الأيام",
+            "used_at": "وقت الاستخدام", "copied_by_device_id": "جهاز النسخ",
+            "employee_name": "الموظف", "action_at": "وقت تسجيل التفعيل",
+        })
+        status_sort_options = ["وقت الاستخدام", "كود التفعيل", "الفئة", "الأيام", "جهاز التفعيل", "جهاز النسخ", "الموظف"]
+        sort_col, sort_direction = st.columns([2, 1])
+        with sort_col:
+            status_sort = st.selectbox("فرز جداول الأكواد حسب", status_sort_options, key="subscription_status_sort")
+        with sort_direction:
+            descending = st.toggle("الأحدث / الأكبر أولاً", value=True, key="subscription_status_desc")
+        status_tabs = st.tabs(["✅ الأكواد المستخدمة", "🟡 الأكواد غير المستخدمة", "📋 كل الأكواد"])
+        for status_tab, status_value in zip(status_tabs, [True, False, None]):
+            with status_tab:
+                status_frame = subscription_status if status_value is None else subscription_status[subscription_status["is_used"] == status_value]
+                status_frame = status_frame.sort_values(status_sort, ascending=not descending, na_position="last")
+                display_columns = ["كود التفعيل", "الفئة", "الأيام", "حالة الكود", "جهاز التفعيل", "جهاز النسخ", "الموظف", "وقت الاستخدام"]
+                render_table(status_frame[display_columns], height=300)
+                st.caption(f"العدد: {len(status_frame)}")
+    else:
+        st.info("لا توجد أكواد في جدول الاشتراكات بعد.")
+
+    section_title("4️⃣ جدول سجل حركة الأكواد")
     code_search = st.text_input("🔍 ابحث عن كود أو موظف أو جهاز", key="code_audit_search")
     audit_query = "SELECT code, category, duration_days, status, employee_name, action, device_id, activated_device_id, copied_by_device_id, reorder_count, created_at, action_at FROM myapp.activation_codes_audit"
     audit_params: list[str] = []
@@ -1176,7 +1222,7 @@ elif menu.startswith("💳"):
         render_table(audit, height=360)
     else:
         st.info("لا يوجد سجل حركة للأكواد بعد.")
-    section_title("4️⃣ تسجيل حركة يدوية")
+    section_title("5️⃣ تسجيل حركة يدوية")
     action_code = st.text_input("الكود", key="action_code")
     action_type = st.selectbox("نوع الحركة", ["copied", "transferred", "used"], format_func=lambda value: {"copied": "تم نسخه", "transferred": "تم نقله", "used": "تم استخدامه"}[value], key="action_type")
     action_device = st.text_input("الجهاز المستخدم أو المستلم", key="action_device")
