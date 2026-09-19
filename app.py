@@ -44,15 +44,13 @@ html, body, [class*="css"] { font-family:'Cairo',sans-serif; direction:rtl; text
 )
 
 # ============================================================
-# الاتصال بقاعدة البيانات — السر يُقرأ من Secrets/Environment فقط
+# الاتصال بقاعدة البيانات — وضع مؤقت للحفاظ على رابط الاتصال داخل الملف
 # ============================================================
-DB_URL = st.secrets.get("DB_URL", os.getenv("DB_URL", ""))
+DB_URL = "postgresql://neondb_owner:npg_AvzFkHQ6M3yo@ep-tiny-wind-ayd9hww0.c-5.us-east-2.aws.neon.tech/neondb?sslmode=require"
 
 @st.cache_resource
 def get_db_pool():
-    if not DB_URL:
-        raise RuntimeError("لم يتم ضبط DB_URL في Streamlit Secrets أو متغيرات البيئة")
-    return pool.SimpleConnectionPool(1, 10, dsn=DB_URL, sslmode="require")
+    return pool.SimpleConnectionPool(1, 50, dsn=DB_URL, sslmode="require")
 
 @contextmanager
 def db_conn():
