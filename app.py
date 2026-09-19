@@ -812,7 +812,7 @@ elif menu.startswith("👥"):
             connection = str(user.get("bot_connection", "🔴 Offline"))
             version = str(user.get("app_version", "غير معروف"))
             with st.expander(f"{connection}  |  📱 {phone}  |  🎯 {clicks:,} نقرة  |  الإصدار {version}"):
-                col1, col2, col3, col4, col5, col6 = st.columns(6)
+                col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
                 with col1:
                     new_phone = st.text_input("تعديل الهاتف", value=phone, key=f"phone_{device_id}")
                     tiers = ["VIP", "STANDARD", "TRIAL"]
@@ -877,6 +877,20 @@ elif menu.startswith("👥"):
                             st.success(f"تمت إعادة تهيئة الجهاز {device_id}")
                             st.rerun()
                 with col6:
+                    st.write("**الاشتراك المجاني**")
+                    confirm_free_disable = st.checkbox("تأكيد الإيقاف", key=f"confirm_free_disable_{device_id}")
+                    if st.button("⛔ تعطيل المجاني", key=f"disable_free_{device_id}", disabled=not confirm_free_disable):
+                        result = run_query(
+                            """UPDATE myapp.users_status
+                                  SET status='Blocked', expiry_date=NOW(), is_frozen=TRUE
+                                WHERE device_id=%s""",
+                            (device_id,),
+                            is_select=False,
+                        )
+                        if result is not None:
+                            st.toast(f"تم تعطيل الاشتراك المجاني للجهاز {device_id}", icon="⛔")
+                            st.rerun()
+                with col7:
                     st.write("**الإصدار**")
                     if st.button("🔄 مزامنة الإصدار", key=f"sync_version_{device_id}", disabled=version_key(version) == required_key):
                         result = run_query("UPDATE myapp.users_status SET app_version=%s WHERE device_id=%s", (required_version, device_id), is_select=False)
@@ -930,7 +944,10 @@ elif menu.startswith("📢"):
     with peak_col2:
         peak_end = st.time_input("نهاية الذروة", value=datetime.strptime(notification_config.get("peak_end", "23:00"), "%H:%M").time())
     st.caption("يستخدم التطبيق يوم الأسبوع والوقت المحلي المرسل في طلب المزامنة لتحديد وقت الذروة.")
-    if st.button("🚀 بث فوري للجميع", type="primary"):
+    send_button_label = "📱 إرسال إشعار منسدل فردي" if delivery_mode.startswith("فردي") else "🚀 بث إشعار منسدل جماعي"
+    if delivery_mode.startswith("فردي"):
+        st.caption("سيظهر الإشعار في شريط Android المنسدل للجهاز المحدد بعد تنفيذ التطبيق للمزامنة.")
+    if st.button(send_button_label, type="primary", key="send_tray_notification"):
         if message.strip():
             target_ids = [selected_device_id] if delivery_mode.startswith("فردي") and selected_device_id else []
             users_saved = run_query("UPDATE myapp.users_status SET notice_message = %s WHERE device_id = ANY(%s)", (message.strip(), target_ids), is_select=False) if target_ids else run_query("UPDATE myapp.users_status SET notice_message = %s", (message.strip(),), is_select=False)
