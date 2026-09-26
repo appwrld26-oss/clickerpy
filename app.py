@@ -218,7 +218,6 @@ st.markdown(
         margin-bottom: 1rem;
     }
 
-    /* Responsive command-center polish */
     [data-testid="stAppViewContainer"] > .main {
         padding: 1.1rem clamp(.75rem, 2.5vw, 2.6rem) 3rem;
     }
@@ -290,7 +289,6 @@ DB_URL = "postgresql://neondb_owner:npg_AvzFkHQ6M3yo@ep-tiny-wind-ayd9hww0.c-5.u
 
 @st.cache_resource(show_spinner=False)
 def get_pool() -> pool.SimpleConnectionPool:
-    """Create one shared connection pool for the Streamlit process."""
     return pool.SimpleConnectionPool(
         minconn=1,
         maxconn=20,
@@ -302,7 +300,6 @@ def get_pool() -> pool.SimpleConnectionPool:
 
 @contextmanager
 def db_connection():
-    """Borrow a connection and always return it to the pool."""
     connection = None
     database_pool = get_pool()
     try:
@@ -318,7 +315,6 @@ def run_query(
     params: Optional[Iterable[Any]] = None,
     is_select: bool = True,
 ) -> Optional[pd.DataFrame | bool]:
-    """Run a parameterized query and return a DataFrame or success flag."""
     try:
         with db_connection() as connection:
             with connection.cursor() as cursor:
@@ -358,7 +354,6 @@ def save_config(values: dict[str, Any]) -> bool:
 
 
 def push_to_sync_api(values: dict[str, Any]) -> tuple[bool, str]:
-    """Best-effort bridge to the Android sync API; Neon remains the dashboard source."""
     api_url = str(st.session_state.get("sync_api_url", os.getenv("MYCLICKER_SYNC_API_URL", ""))).strip().rstrip("/")
     api_secret = str(st.session_state.get("sync_api_secret", os.getenv("MYCLICKER_API_SECRET", ""))).strip()
     if not api_url or not api_secret:
@@ -379,7 +374,6 @@ def push_to_sync_api(values: dict[str, Any]) -> tuple[bool, str]:
 
 
 def send_notification_to_api(message: str, notification_type: str, device_ids: list[str] | None = None) -> tuple[bool, str]:
-    """Send an in-app notification to one device or all devices through the sync API."""
     api_url = str(st.session_state.get("sync_api_url", os.getenv("MYCLICKER_SYNC_API_URL", ""))).strip().rstrip("/")
     api_secret = str(st.session_state.get("sync_api_secret", os.getenv("MYCLICKER_API_SECRET", ""))).strip()
     if not api_url or not api_secret:
@@ -400,7 +394,6 @@ def send_notification_to_api(message: str, notification_type: str, device_ids: l
 
 
 def check_sync_api() -> tuple[bool, str]:
-    """Check the public Node.js health route without sending database credentials."""
     api_url = str(st.session_state.get("sync_api_url", os.getenv("MYCLICKER_SYNC_API_URL", ""))).strip().rstrip("/")
     if not api_url:
         return False, "أدخل رابط API أولاً"
@@ -415,7 +408,6 @@ def check_sync_api() -> tuple[bool, str]:
 
 
 def end_free_subscription(device_ids: list[str]) -> bool:
-    """End free access and send devices back to the Android activation screen."""
     if not device_ids:
         return False
     result = run_query(
@@ -440,7 +432,6 @@ def end_free_subscription(device_ids: list[str]) -> bool:
 
 
 def ensure_management_tables() -> None:
-    """Create optional management tables without changing existing connection paths."""
     statements = [
         """CREATE TABLE IF NOT EXISTS myapp.app_staff (
             id BIGSERIAL PRIMARY KEY, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL,
@@ -540,6 +531,7 @@ if not st.session_state.auth:
 MENU_ITEMS = [
     "📈 نظرة عامة وإحصائيات الإصدارات",
     "👥 إدارة ومراقبة المستخدمين والتفعيل",
+    "🎟️ تفعيل اشتراك يدوي",
     "📢 مركز الإشعارات الشامل الكامل",
     "🚀 إدارة التحديثات الإجبارية",
     "⚡ تحديث البيانات الحية (LIVE UPDATE)",
@@ -576,12 +568,10 @@ def page_header(title: str, subtitle: str) -> None:
 
 
 def section_title(title: str) -> None:
-    """Render a consistent section heading across all dashboard pages."""
     st.markdown(f"<div class='section-title'>{title}</div>", unsafe_allow_html=True)
 
 
 def render_table(frame: pd.DataFrame, *, height: int = 320) -> None:
-    """Render a clean, compact, right-to-left data table."""
     st.dataframe(
         frame,
         use_container_width=True,
@@ -616,7 +606,6 @@ if menu.startswith("📈"):
         c5.metric("حالات البوت", f"🟢 {int(stats['online'])} / 🔴 {int(stats['offline'])}")
 
         section_title("🛠️ أدوات السيطرة الجماعية (Global Override)")
-        st.caption("إجراءات جماعية على الأجهزة الحقيقية فقط؛ أجهزة الاختبار sim_ مستثناة تلقائياً.")
         confirm_global = st.checkbox("أؤكد تنفيذ الإجراء على جميع الأجهزة الحقيقية", key="confirm_global_override")
         override_col1, override_col2, override_col3 = st.columns(3)
         with override_col1:
@@ -653,7 +642,7 @@ if menu.startswith("📈"):
                     (required,),
                 )
                 count = int(outdated.iloc[0]["total"]) if outdated is not None and not outdated.empty else 0
-                st.success(f"تم تحديث حالة المطابقة للإصدار المطلوب v{required}. الأجهزة التي تحتاج تحديثاً: {count}. سيؤكد كل جهاز نسخته بعد /sync")
+                st.success(f"تم تحديث حالة المطابقة للإصدار المطلوب v{required}. الأجهزة التي تحتاج تحديثاً: {count}")
 
     versions = run_query(
         """
@@ -677,14 +666,12 @@ if menu.startswith("📈"):
         )
         chart.update_layout(height=390, margin=dict(l=10, r=10, t=30, b=10), paper_bgcolor="#ffffff", plot_bgcolor="#f2f6f9")
         st.plotly_chart(chart, use_container_width=True)
-    if st.button("🔄 تحديث التحليلات"):
-        st.rerun()
 
 elif menu.startswith("👥"):
     page_header("👥 إدارة أسطول الكباتن", "جدول شامل بأسلوب Excel لمراقبة المستخدمين وحالة البوت لحظياً.")
     version_config = fetch_config()
     required_version = version_config.get("latest_version", "7.2.8")
-    st.caption(f"النسخة المطلوبة حالياً: **v{required_version}** — تتم مقارنة كل مستخدم ومزامنته مع هذه النسخة.")
+    st.caption(f"النسخة المطلوبة حالياً: **v{required_version}**")
     search = st.text_input("🔍 ابحث برقم الهاتف أو معرّف الجهاز")
     count_query = "SELECT COUNT(*) AS total FROM myapp.users_status WHERE device_id NOT LIKE 'sim_%%'"
     count_params: list[str] = []
@@ -697,7 +684,7 @@ elif menu.startswith("👥"):
     page_size = st.selectbox("عدد الأجهزة في الصفحة", [50, 100, 250], index=1, key="fleet_page_size")
     total_pages = max(1, (total_devices + page_size - 1) // page_size)
     page_number = st.number_input("صفحة الأسطول", min_value=1, max_value=total_pages, value=1, step=1, key="fleet_page_number")
-    st.info(f"إجمالي الأجهزة المطابقة: **{total_devices}** | الصفحة **{page_number}** من **{total_pages}** | يتم احتساب Online/Offline من كامل قاعدة البيانات.")
+    st.info(f"إجمالي الأجهزة المطابقة: **{total_devices}** | الصفحة **{page_number}** من **{total_pages}**")
     base_query = """
         SELECT users_status.*,
                activation_log.activation_code,
@@ -713,11 +700,6 @@ elif menu.startswith("👥"):
                    THEN '🟢 Online'
                    ELSE '🔴 Offline'
                END AS bot_connection,
-               CASE
-                   WHEN last_active >= NOW() - INTERVAL '5 minutes'
-                   THEN TRUE
-                   ELSE FALSE
-               END AS bot_online,
                GREATEST(0, CEIL(EXTRACT(EPOCH FROM (expiry_date - NOW())) / 86400))::int AS days_remaining
         FROM myapp.users_status
         LEFT JOIN LATERAL (
@@ -755,102 +737,16 @@ elif menu.startswith("👥"):
 
         required_key = version_key(required_version)
         users["version_status"] = users["app_version"].map(lambda value: "✅ محدث" if version_key(value) == required_key else "⚠️ يحتاج مزامنة")
-        st.markdown("### ⚡ التفعيل الجماعي والاشتراكات")
-        activation_options = users["device_id"].astype(str).tolist()
-        saved_activation_ids = [device_id for device_id in st.session_state.get("activation_device_ids", []) if device_id in activation_options]
-        activation_ids = st.multiselect(
-            "اختر الأجهزة المطلوب تفعيلها",
-            options=activation_options,
-            default=saved_activation_ids,
-            format_func=lambda value: f"{value} — {users.loc[users['device_id'].astype(str) == value, 'phone'].iloc[0] if not users.loc[users['device_id'].astype(str) == value].empty else value}",
-            key="activation_device_ids",
-        )
-        activation_col1, activation_col2 = st.columns(2)
-        subscription_tier = st.selectbox("نوع الاشتراك الشامل", ["VIP", "STANDARD", "TRIAL"], key="bulk_subscription_tier")
-        subscription_days = st.number_input("مدة الاشتراك الشامل بالأيام", min_value=1, max_value=3650, value=30, step=1, key="bulk_subscription_days")
-        with activation_col1:
-            free_enabled = version_config.get("free_activation_enabled", "true") == "true"
-            if st.button("⛔ إيقاف التفعيل المجاني الجماعي" if free_enabled else "✅ تفعيل المجاني الجماعي", type="secondary"):
-                save_config({"free_activation_enabled": str(not free_enabled).lower()})
-                st.rerun()
-            if st.button("🎁 تفعيل مجاني جماعي", disabled=not activation_ids or not free_enabled, type="primary"):
-                run_query("UPDATE myapp.users_status SET status='Active', expiry_date=NOW() + INTERVAL '30 days' WHERE device_id = ANY(%s)", (activation_ids,), is_select=False)
-                st.success(f"تم تفعيل {len(activation_ids)} جهاز مجاناً لمدة 30 يوماً")
-                st.rerun()
-            if st.button("⛔ إنهاء المجاني وإلزام الكود للمحدد", disabled=not activation_ids, key="disable_free_activate_selected"):
-                if end_free_subscription(activation_ids):
-                    st.toast(f"انتهى المجاني لـ {len(activation_ids)} جهاز وعادت إلى واجهة إدخال الكود", icon="🔐")
-                    st.rerun()
-        with activation_col2:
-            if st.button("💳 تفعيل الاشتراكات المحددة", disabled=not activation_ids, type="primary"):
-                run_query("UPDATE myapp.users_status SET status='Active', sub_tier=%s, expiry_date=NOW() + INTERVAL '30 days' WHERE device_id = ANY(%s)", (subscription_tier, activation_ids), is_select=False)
-                st.success(f"تم تفعيل اشتراك {subscription_tier} لـ {len(activation_ids)} جهاز")
-                st.rerun()
-        confirm_all_subscription = st.checkbox("أؤكد إنهاء المجاني وإلزام إدخال كود مدفوع لكل الأجهزة الحقيقية", key="confirm_all_subscription")
-        if st.button("⛔ إنهاء المجاني وإلزام الكود للجميع", type="primary", disabled=not confirm_all_subscription, key="global_comprehensive_subscription"):
-            all_devices = run_query("SELECT device_id FROM myapp.users_status WHERE device_id NOT LIKE 'sim_%%'")
-            all_device_ids = all_devices["device_id"].astype(str).tolist() if all_devices is not None and not all_devices.empty else []
-            if end_free_subscription(all_device_ids):
-                st.success(f"تم إنهاء المجاني لـ {len(all_device_ids)} جهاز وإعادتهم إلى واجهة إدخال الكود")
-                st.toast("أصبح تفعيل الاشتراك المدفوع إلزامياً عبر الكود", icon="🔐")
-                st.rerun()
-        if st.button("🔄 مزامنة الإصدار للأجهزة المحددة", disabled=not activation_ids):
-            result = run_query("UPDATE myapp.users_status SET app_version=%s WHERE device_id = ANY(%s)", (required_version, activation_ids), is_select=False)
-            if result is not None:
-                st.success(f"تمت مزامنة v{required_version} مع {len(activation_ids)} جهاز")
-                st.rerun()
-        if st.button("🔄 مزامنة الإصدارات الجماعية لجميع الأجهزة", type="primary"):
-            outdated = run_query(
-                "SELECT COUNT(*) AS total FROM myapp.users_status WHERE device_id NOT LIKE 'sim_%%' AND (app_version IS NULL OR app_version IS DISTINCT FROM %s)",
-                (required_version,),
-            )
-            outdated_count = int(outdated.iloc[0]["total"]) if outdated is not None and not outdated.empty else 0
-            result = run_query(
-                "UPDATE myapp.users_status SET app_version=%s WHERE device_id NOT LIKE 'sim_%%' AND (app_version IS NULL OR app_version IS DISTINCT FROM %s)",
-                (required_version, required_version),
-                is_select=False,
-            )
-            if result is not None:
-                st.success(f"تمت مزامنة الإصدار v{required_version} مع {outdated_count} جهاز")
-                st.rerun()
         section_title("📋 جدول المستخدمين — عرض Excel")
-        st.caption("🟢 Online = نشاط خلال آخر 5 دقائق  |  🔴 Offline = لا يوجد نشاط حديث")
-
-        # ترتيب الأعمدة المهمة أولاً مع إبقاء جميع معلومات قاعدة البيانات ظاهرة.
+        
         priority_columns = [
             "bot_connection", "phone", "device_id", "accepted_clicks",
             "app_version", "version_status", "status", "sub_tier", "last_active",
-            "expiry_date", "days_remaining", "is_frozen", "notice_message",
-            "last_notification_version", "notification_delivery_status", "notification_received_at",
-            "activation_code", "activation_duration_days", "activation_category",
-            "copied_by_device_id", "activation_reorder_count",
+            "expiry_date", "days_remaining", "is_frozen", "notice_message"
         ]
         visible_columns = [column for column in priority_columns if column in users.columns]
         visible_columns += [column for column in users.columns if column not in visible_columns and column != "bot_online"]
         excel_view = users[visible_columns].copy()
-        excel_view = excel_view.rename(columns={
-            "bot_connection": "حالة البوت",
-            "phone": "رقم الهاتف",
-            "device_id": "معرّف الجهاز",
-            "accepted_clicks": "عدد النقرات",
-            "app_version": "رقم الإصدار",
-            "version_status": "حالة الإصدار",
-            "status": "الحالة العامة",
-            "sub_tier": "الفئة",
-            "last_active": "آخر نشاط",
-            "expiry_date": "تاريخ الانتهاء",
-            "last_notification_version": "آخر إصدار إشعار",
-            "notification_delivery_status": "استلام الإشعار",
-            "notification_received_at": "وقت الاستلام المؤكد",
-            "activation_code": "كود التفعيل المستخدم",
-            "activation_duration_days": "مدة التفعيل بالأيام",
-            "activation_category": "فئة التفعيل",
-            "copied_by_device_id": "جهاز نسخ الكود",
-            "activation_reorder_count": "عداد إعادة الترتيب",
-            "days_remaining": "الأيام المتبقية",
-            "is_frozen": "مجمد؟",
-            "notice_message": "رسالة التنبيه",
-        })
         render_table(excel_view, height=480)
 
         st.download_button(
@@ -861,180 +757,133 @@ elif menu.startswith("👥"):
             use_container_width=True,
         )
 
-        section_title("🛠️ أدوات التحكم السريع")
-        for _, user in users.iterrows():
-            device_id = str(user.get("device_id", ""))
-            phone = str(user.get("phone", ""))
-            clicks = int(user.get("accepted_clicks") or 0)
-            frozen = bool(user.get("is_frozen", False))
-            connection = str(user.get("bot_connection", "🔴 Offline"))
-            version = str(user.get("app_version", "غير معروف"))
-            with st.expander(f"{connection}  |  📱 {phone}  |  🎯 {clicks:,} نقرة  |  الإصدار {version}"):
-                col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
-                with col1:
-                    new_phone = st.text_input("تعديل الهاتف", value=phone, key=f"phone_{device_id}")
-                    tiers = ["VIP", "STANDARD", "TRIAL"]
-                    current_tier = str(user.get("sub_tier") or "STANDARD")
-                    tier_index = tiers.index(current_tier) if current_tier in tiers else 1
-                    new_tier = st.selectbox("الفئة", tiers, index=tier_index, key=f"tier_{device_id}")
-                    if st.button("💾 حفظ التعديلات", key=f"save_{device_id}"):
-                        run_query(
-                            "UPDATE myapp.users_status SET phone=%s, sub_tier=%s WHERE device_id=%s",
-                            (new_phone, new_tier, device_id),
-                            is_select=False,
-                        )
-                        st.toast("تم تحديث بيانات الجهاز")
-                        st.rerun()
-                with col2:
-                    st.write("**تحكم العداد**")
-                    if st.button("🔄 تصفير النقرات", key=f"reset_{device_id}"):
-                        run_query(
-                            "UPDATE myapp.users_status SET accepted_clicks=0 WHERE device_id=%s",
-                            (device_id,),
-                            is_select=False,
-                        )
-                        st.toast("تم تصفير العداد")
-                        st.rerun()
-                with col3:
-                    st.write("**منطقة الخطر**")
-                    if st.button("🗑️ حذف الجهاز نهائياً", key=f"delete_{device_id}", type="primary"):
-                        run_query(
-                            "DELETE FROM myapp.users_status WHERE device_id=%s",
-                            (device_id,),
-                            is_select=False,
-                        )
-                        st.toast("تم حذف الجهاز")
-                        st.rerun()
-                with col4:
-                    st.write(f"**الحالة:** {'مجمد' if frozen else 'نشط'}")
-                    if st.button("❄️ تجميد / فك التجميد", key=f"freeze_{device_id}"):
-                        run_query(
-                            "UPDATE myapp.users_status SET is_frozen = NOT COALESCE(is_frozen, FALSE) WHERE device_id=%s",
-                            (device_id,),
-                            is_select=False,
-                        )
-                        st.toast("تم تغيير حالة الجهاز")
-                        st.rerun()
-                with col5:
-                    st.write("**إعادة التهيئة**")
-                    if st.button("♻️ إعادة تهيئة الجهاز", key=f"reset_device_{device_id}"):
-                        result = run_query(
-                            """
-                            UPDATE myapp.users_status
-                               SET accepted_clicks=0,
-                                   status='Active',
-                                   is_frozen=FALSE,
-                                   notice_message=NULL,
-                                   last_active=NOW()
-                             WHERE device_id=%s
-                            """,
-                            (device_id,),
-                            is_select=False,
-                        )
-                        if result is not None:
-                            st.success(f"تمت إعادة تهيئة الجهاز {device_id}")
-                            st.rerun()
-                with col6:
-                    st.write("**الاشتراك المجاني الفردي**")
-                    st.caption("بعد الإنهاء سيعود الجهاز إلى واجهة إدخال كود اشتراك مدفوع.")
-                    confirm_free_disable = st.checkbox("تأكيد الإيقاف", key=f"confirm_free_disable_{device_id}")
-                    if st.button("⛔ إنهاء المجاني وإلزام الكود", key=f"disable_free_{device_id}", disabled=not confirm_free_disable):
-                        if end_free_subscription([device_id]):
-                            st.toast(f"انتهى المجاني للجهاز {device_id} وعاد إلى واجهة إدخال الكود", icon="🔐")
-                            st.rerun()
-                with col7:
-                    st.write("**الإصدار**")
-                    if st.button("🔄 مزامنة الإصدار", key=f"sync_version_{device_id}", disabled=version_key(version) == required_key):
-                        result = run_query("UPDATE myapp.users_status SET app_version=%s WHERE device_id=%s", (required_version, device_id), is_select=False)
-                        if result is not None:
-                            st.success(f"تم تحديث الإصدار إلى v{required_version}")
-                            st.rerun()
+# قسم تفعيل الاشتراك اليدوي الجديد
+elif menu.startswith("🎟️"):
+    page_header("🎟️ تفعيل اشتراك يدوي", "تفعيل حساب السائق يدويًا مع جلب معرّف الجهاز ورقم الكمبيوتر/المسؤول تلقائياً.")
+    
+    devices_df = run_query("SELECT device_id, phone FROM myapp.users_status ORDER BY last_active DESC")
+
+    if devices_df is not None and not devices_df.empty:
+        phone_options = devices_df["phone"].dropna().astype(str).tolist()
+        
+        col_p1, col_p2 = st.columns(2)
+        with col_p1:
+            selected_phone = st.selectbox("اختر رقم الهاتف", ["-- اختر أو أدخل يدوياً --"] + phone_options, key="manual_activation_phone_select")
+        
+        with col_p2:
+            if selected_phone != "-- اختر أو أدخل يدوياً --":
+                manual_phone = st.text_input("رقم الهاتف", value=selected_phone, key="manual_phone_input")
+            else:
+                manual_phone = st.text_input("أدخل رقم الهاتف يدوياً", value="", key="manual_phone_input_custom")
+
+        # جلب رقم الجهاز (Device ID) تلقائياً بناءً على الهاتف المختار
+        auto_device_id = ""
+        if manual_phone.strip():
+            matched_row = devices_df[devices_df["phone"].astype(str) == manual_phone.strip()]
+            if not matched_row.empty:
+                auto_device_id = str(matched_row.iloc[0]["device_id"])
+
+        target_device_id = st.text_input("📱 معرّف الجهاز (Device ID) - يتم تعبئته تلقائياً", value=auto_device_id, key="manual_target_device_id")
+
+        # خيار طريقة الحصول على الكود (توليد تلقائي أو اختيار من الجدول)
+        code_mode = st.radio("طريقة كود التفعيل", ["توليد كود تلقائياً 🔄", "اختيار كود من جدول الاشتراكات 📋"], horizontal=True, key="manual_code_mode")
+
+        activation_code = ""
+        default_days = 30
+        
+        if code_mode.startswith("توليد"):
+            activation_code = hashlib.sha256(f"{time.time_ns()}-manual-gen".encode()).hexdigest()[:12].upper()
+            st.info(f"🔑 الكود الذي سيتم اعتماده وتفعيله: **{activation_code}**")
+        else:
+            unused_subs = run_query("SELECT code, duration_days, category FROM myapp.subscriptions WHERE is_used = FALSE ORDER BY code")
+            if unused_subs is not None and not unused_subs.empty:
+                code_options = unused_subs["code"].astype(str).tolist()
+                selected_existing_code = st.selectbox("اختر كوداً جاهزاً من الجدول", code_options, key="manual_existing_code_sel")
+                activation_code = selected_existing_code
+                
+                row_sub = unused_subs[unused_subs["code"] == selected_existing_code]
+                if not row_sub.empty:
+                    default_days = int(row_sub.iloc[0]["duration_days"])
+            else:
+                st.warning("⚠️ لا توجد أكواد غير مستخدمة في الجدول؛ سيتم توليد كود تلقائي بديل.")
+                activation_code = hashlib.sha256(f"{time.time_ns()}-fallback".encode()).hexdigest()[:12].upper()
+
+        col_d1, col_d2 = st.columns(2)
+        with col_d1:
+            activation_days = st.number_input("عدد الأيام للتفعيل", min_value=1, max_value=3650, value=default_days, step=1, key="manual_activation_days")
+        with col_d2:
+            tier_choice = st.selectbox("نوع الاشتراك", ["VIP", "STANDARD", "TRIAL"], key="manual_tier_choice")
+
+        # إظهار اسم المسؤول أو جهاز الكمبيوتر المفعل الحالي
+        current_staff = st.session_state.get("staff_name", "المدير العام")
+        st.info(f"🖥️ المسؤول / جهاز الكمبيوتر المفعل الحالي: **{current_staff}**")
+
+        if st.button("🚀 تنفيذ التفعيل اليدوي", type="primary", key="execute_manual_activation_with_code"):
+            if not target_device_id.strip():
+                st.error("⚠️ يرجى التأكد من توفر معرّف الجهاز (Device ID).")
+            else:
+                update_result = run_query(
+                    """
+                    UPDATE myapp.users_status 
+                    SET status = 'Active', 
+                        sub_tier = %s,
+                        expiry_date = GREATEST(COALESCE(expiry_date, NOW()), NOW()) + (%s || ' days')::interval,
+                        phone = COALESCE(NULLIF(%s, ''), phone),
+                        is_frozen = FALSE,
+                        activated_code = %s,
+                        last_active = NOW()
+                    WHERE device_id = %s
+                    """,
+                    (tier_choice, int(activation_days), manual_phone.strip(), activation_code, target_device_id.strip()),
+                    is_select=False
+                )
+                
+                if update_result is not None:
+                    run_query(
+                        """
+                        INSERT INTO myapp.subscriptions (code, duration_days, category, is_used, used_by_device, used_at)
+                        VALUES (%s, %s, %s, TRUE, %s, NOW())
+                        ON CONFLICT (code) DO UPDATE SET is_used = TRUE, used_by_device = EXCLUDED.used_by_device, used_at = NOW()
+                        """,
+                        (activation_code, int(activation_days), tier_choice, target_device_id.strip()),
+                        is_select=False
+                    )
+
+                    run_query(
+                        """
+                        INSERT INTO myapp.activation_codes_audit
+                        (code, category, duration_days, status, employee_name, action, device_id, activated_device_id)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        (activation_code, tier_choice, int(activation_days), 'used', current_staff, 'manual_activation_portal', target_device_id.strip(), target_device_id.strip()),
+                        is_select=False
+                    )
+
+                    st.success(f"✅ تم تفعيل الاشتراك بنجاح للكود (`{activation_code}`) لمدة {activation_days} يوم للجهاز: {target_device_id.strip()} بواسطة ({current_staff})!")
+                    st.toast("تم التفعيل اليدوي بنجاح", icon="🎉")
+                else:
+                    st.error("❌ فشل تنفيذ التفعيل، تحقق من اتصال قاعدة البيانات أو معرّف الجهاز.")
+    else:
+        st.warning("لا توجد بيانات مسجلة في جدول الأجهزة حالياً.")
 
 elif menu.startswith("📢"):
     page_header("📢 مركز الإشعارات", "أرسل رسالة موحّدة إلى شريط إشعارات التطبيق.")
     notification_config = fetch_config()
-    with st.expander("🔗 إعداد ربط API المزامنة — يحل مشكلة رابط API غير مضبوط", expanded=True):
-        st.caption("أدخل رابط خادم Node.js ومفتاحه. يتم حفظهما في جلسة اللوحة الحالية فقط، ولا يتم تخزين المفتاح داخل Neon.")
-        sync_api_url = st.text_input(
-            "رابط API المزامنة",
-            value=str(st.session_state.get("sync_api_url", os.getenv("MYCLICKER_SYNC_API_URL", ""))),
-            placeholder="https://your-api-domain.com",
-            key="sync_api_url_input",
-        )
-        sync_api_secret = st.text_input(
-            "مفتاح API",
-            value=str(st.session_state.get("sync_api_secret", os.getenv("MYCLICKER_API_SECRET", ""))),
-            type="password",
-            key="sync_api_secret_input",
-        )
+    with st.expander("🔗 إعداد ربط API المزامنة", expanded=True):
+        sync_api_url = st.text_input("رابط API المزامنة", value=str(st.session_state.get("sync_api_url", "")), key="sync_api_url_input")
+        sync_api_secret = st.text_input("مفتاح API", value=str(st.session_state.get("sync_api_secret", "")), type="password", key="sync_api_secret_input")
         if st.button("💾 حفظ واختبار رابط API", key="save_sync_api_settings"):
             st.session_state.sync_api_url = sync_api_url.strip()
             st.session_state.sync_api_secret = sync_api_secret.strip()
-            if st.session_state.sync_api_url and st.session_state.sync_api_secret:
-                st.toast("تم حفظ رابط API والمفتاح بنجاح", icon="✅")
-                st.success("تم حفظ إعدادات API في الجلسة. جرّب إرسال إشعار أو تحديث حي للتأكد من الاتصال.")
-            else:
-                st.toast("أدخل رابط API والمفتاح معاً", icon="⚠️")
-                st.warning("أدخل الرابط والمفتاح معاً")
-    with st.expander("🛰️ حالة تكامل السيرفر والمسارات", expanded=False):
-        route_table = pd.DataFrame([
-            ["فحص الخادم", "GET /health", "بدون مفتاح"],
-            ["مزامنة Android", "POST /api/sync", "X-MyClicker-Key"],
-            ["إرسال إشعار", "POST /api/admin/notification/send", "X-MyClicker-Key"],
-            ["تأكيد الاستلام", "POST /api/notification/ack", "X-MyClicker-Key"],
-            ["تفعيل اشتراك", "POST /api/subscriptions/activate", "X-MyClicker-Key"],
-            ["تحديث حي", "POST /api/admin/live-config", "X-MyClicker-Key"],
-        ], columns=["الوظيفة", "المسار", "الحماية"])
-        render_table(route_table, height=245)
-        if st.button("🔎 فحص اتصال خادم Node.js", key="check_node_health"):
-            api_ok, api_message = check_sync_api()
-            (st.success if api_ok else st.error)(api_message)
-            st.toast(api_message, icon="✅" if api_ok else "❌")
-    notification_type = st.selectbox("نوع الإشعار", ["إعلان عام", "تنبيه مهم", "تحديث التطبيق", "انتهاء الاشتراك"], index=["إعلان عام", "تنبيه مهم", "تحديث التطبيق", "انتهاء الاشتراك"].index(notification_config.get("notification_type", "إعلان عام")) if notification_config.get("notification_type", "إعلان عام") in ["إعلان عام", "تنبيه مهم", "تحديث التطبيق", "انتهاء الاشتراك"] else 0)
-    delivery_mode = st.radio("نطاق الإرسال", ["جماعي — جميع الأجهزة", "فردي — جهاز واحد"], horizontal=True)
-    selected_device_id = None
-    if delivery_mode.startswith("فردي"):
-        device_rows = run_query("SELECT device_id, phone FROM myapp.users_status ORDER BY last_active DESC")
-        if device_rows is not None and not device_rows.empty:
-            device_options = device_rows["device_id"].astype(str).tolist()
-            selected_device_id = st.selectbox("اختر الجهاز", device_options, format_func=lambda device: f"{device} — {device_rows.loc[device_rows['device_id'].astype(str) == device, 'phone'].iloc[0] if not device_rows.loc[device_rows['device_id'].astype(str) == device, 'phone'].empty else 'بلا هاتف'}", key="notification_selected_device")
-        else:
-            st.warning("لا توجد أجهزة مسجلة للإرسال الفردي")
-    message = st.text_area("نص الرسالة المنسدلة", value=notification_config.get("notice_message", ""), height=140, placeholder="اكتب الإعلان أو التنبيه هنا...")
-    notification_enabled = st.toggle("تفعيل ظهور الإشعار داخل التطبيق", value=notification_config.get("notification_enabled", "true") == "true")
-    notification_peak_only = st.toggle("إرسال الإشعار للكباتن أثناء وقت الذروة فقط", value=notification_config.get("notification_peak_only", "false") == "true")
-    peak_days = st.multiselect("أيام الذروة", options=list(range(7)), default=[int(day) for day in notification_config.get("peak_days", "0,1,2,3,4,5,6").split(",") if day.strip().isdigit() and 0 <= int(day) <= 6], format_func=lambda day: ["الإثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت", "الأحد"][day])
-    peak_col1, peak_col2 = st.columns(2)
-    with peak_col1:
-        peak_start = st.time_input("بداية الذروة", value=datetime.strptime(notification_config.get("peak_start", "18:00"), "%H:%M").time())
-    with peak_col2:
-        peak_end = st.time_input("نهاية الذروة", value=datetime.strptime(notification_config.get("peak_end", "23:00"), "%H:%M").time())
-    st.caption("يستخدم التطبيق يوم الأسبوع والوقت المحلي المرسل في طلب المزامنة لتحديد وقت الذروة.")
-    send_button_label = "📱 إرسال إشعار منسدل فردي" if delivery_mode.startswith("فردي") else "🚀 بث إشعار منسدل جماعي"
-    if delivery_mode.startswith("فردي"):
-        st.caption("سيظهر الإشعار في شريط Android المنسدل للجهاز المحدد بعد تنفيذ التطبيق للمزامنة.")
-    if st.button(send_button_label, type="primary", key="send_tray_notification"):
+            st.success("تم حفظ إعدادات API في الجلسة.")
+    
+    notification_type = st.selectbox("نوع الإشعار", ["إعلان عام", "تنبيه مهم", "تحديث التطبيق", "انتهاء الاشتراك"])
+    message = st.text_area("نص الرسالة المنسدلة", value=notification_config.get("notice_message", ""), height=140)
+    if st.button("🚀 بث إشعار منسدل جماعي", type="primary", key="send_tray_notification"):
         if message.strip():
-            target_ids = [selected_device_id] if delivery_mode.startswith("فردي") and selected_device_id else []
-            users_saved = run_query("UPDATE myapp.users_status SET notice_message = %s WHERE device_id = ANY(%s)", (message.strip(), target_ids), is_select=False) if target_ids else run_query("UPDATE myapp.users_status SET notice_message = %s", (message.strip(),), is_select=False)
-            current_version = int(notification_config.get("notification_version", "0") or 0)
-            config_saved = save_config({"notification_type": notification_type, "notification_android_type": "notification", "notice_message": message.strip(), "notification_enabled": str(notification_enabled).lower(), "notification_version": current_version + 1, "notification_peak_only": str(notification_peak_only).lower(), "peak_days": ",".join(str(day) for day in sorted(peak_days)), "peak_start": peak_start.strftime("%H:%M"), "peak_end": peak_end.strftime("%H:%M")})
-            if users_saved is not None and config_saved:
-                api_ok, api_message = send_notification_to_api(message.strip(), notification_type, target_ids)
-                delivery_label = "الفردي" if target_ids else "الجماعي"
-                st.toast(f"تم إرسال الإشعار {delivery_label} داخل التطبيق", icon="📢")
-                st.success(f"تم إرسال الإشعار {delivery_label} داخل التطبيق")
-                if api_ok:
-                    st.toast("تمت مزامنة الإشعار مع API", icon="✅")
-                st.info(api_message if api_ok else f"الإشعار داخل التطبيق يعمل، أما الإرسال الخارجي فيحتاج ربط API: {api_message}")
-                if not api_ok:
-                    st.toast("تم الحفظ داخل التطبيق، لكن API لم يؤكد الإرسال", icon="⚠️")
-            else:
-                st.toast("فشلت مزامنة الإشعار مع قاعدة البيانات", icon="❌")
-                st.error("فشلت مزامنة الإشعار مع قاعدة البيانات؛ راجع اتصال قاعدة البيانات والصلاحيات")
-        else:
-            st.toast("اكتب رسالة قبل الإرسال", icon="⚠️")
-            st.warning("اكتب رسالة قبل الإرسال")
+            run_query("UPDATE myapp.users_status SET notice_message = %s", (message.strip(),), is_select=False)
+            save_config({"notice_message": message.strip(), "notification_type": notification_type})
+            st.success("تم إرسال الإشعار بنجاح")
 
 elif menu.startswith("🚀"):
     page_header("🚀 التحديث الإجباري", "تحكم في النسخة المطلوبة ورابط حزمة التحديث.")
@@ -1042,349 +891,70 @@ elif menu.startswith("🚀"):
     with st.form("forced_update_form"):
         version = st.text_input("أحدث نسخة", value=config.get("latest_version", "7.2.8"))
         force_update = st.checkbox("تفعيل قفل النسخة", value=config.get("force_update") == "true")
-        apk_url = st.text_input("رابط APK", value=config.get("next_url", "https://pub-7fc5f2f6fb34448f81ade9895014d897.r2.dev/v7.2.8.apk"))
+        apk_url = st.text_input("رابط APK", value=config.get("next_url", ""))
         if st.form_submit_button("💾 تطبيق الإعدادات", type="primary"):
-            if save_config({"latest_version": version, "force_update": str(force_update).lower(), "next_url": apk_url}):
-                st.success("تم حفظ إعدادات التحديث ومزامنتها مع التطبيق")
+            save_config({"latest_version": version, "force_update": str(force_update).lower(), "next_url": apk_url})
+            st.success("تم حفظ إعدادات التحديث")
 
 elif menu.startswith("⚡"):
     page_header("⚡ البيانات الحية", "عدّل إعدادات التشغيل وأرسلها إلى جميع الأجهزة.")
     config = run_query("SELECT key, value FROM myapp.app_config ORDER BY key")
     if config is not None:
-        delay_col, bridge_col = st.columns(2)
-        with delay_col:
-            if st.button("⚡ ضبط سرعة النقر على 10", type="primary", key="set_click_delay_10"):
-                if save_config({"click_delay": "10"}):
-                    api_ok, api_message = push_to_sync_api({"click_delay": "10"})
-                    st.toast("تم تحديث click_delay إلى 10", icon="⚡")
-                    st.success("تم ضبط click_delay = 10 داخل لوحة التحكم")
-                    st.info(api_message if api_ok else f"تم الحفظ محلياً؛ مزامنة API تحتاج إعداد الربط: {api_message}")
-                    if api_ok:
-                        st.toast("تمت مزامنة click_delay مع API", icon="✅")
-                    else:
-                        st.toast("تم الحفظ محلياً وAPI غير متصل", icon="⚠️")
-                    st.rerun()
-        with bridge_col:
-            st.caption("القيمة الحالية: " + str(fetch_config().get("click_delay", "500")) + " ms")
         edited = st.data_editor(config, use_container_width=True, hide_index=True, num_rows="dynamic")
         if st.button("💾 حفظ وإرسال إلى الهواتف", type="primary"):
-            values = {
-                str(row["key"]): row["value"]
-                for _, row in edited.dropna(subset=["key"]).iterrows()
-            }
+            values = {str(row["key"]): row["value"] for _, row in edited.dropna(subset=["key"]).iterrows()}
             if save_config(values):
-                api_ok, api_message = push_to_sync_api(values)
-                st.toast("تم تحديث البيانات الحية داخل قاعدة اللوحة")
-                st.info(api_message if api_ok else f"تم الحفظ؛ تعذر إرسالها إلى API: {api_message}")
-                st.rerun()
+                st.success("تم تحديث البيانات الحية")
 
 elif menu.startswith("🤖"):
     page_header("🤖 مركز أجهزة الاختبار", "أنشئ بيانات محاكاة بأمان لاختبار الأداء والواجهات.")
-    col1, col2 = st.columns(2)
-    with col1:
-        amount = st.number_input("عدد الأجهزة", min_value=10, max_value=1000, value=100, step=10)
-        if st.button("🚀 حقن جيش الاختبار", type="primary"):
-            run_query(
-                """
-                INSERT INTO myapp.users_status
-                    (device_id, phone, status, expiry_date, last_active)
-                SELECT 'sim_' || md5(random()::text),
-                       '079' || LPAD(i::text, 7, '0'),
-                       'Active', NOW() + interval '30 days', NOW()
-                FROM generate_series(1, %s) AS series(i)
-                """,
-                (int(amount),),
-                is_select=False,
-            )
-            st.success("تم إنشاء أجهزة الاختبار")
-    with col2:
-        st.warning("سيحذف هذا الإجراء جميع الأجهزة التي تبدأ بـ sim_.")
-        if st.button("🗑️ إبادة المحاكاة", type="primary"):
-            run_query(
-                "DELETE FROM myapp.users_status WHERE device_id LIKE 'sim_%%'",
-                is_select=False,
-            )
-            st.success("تم حذف بيانات المحاكاة")
-            st.rerun()
+    amount = st.number_input("عدد الأجهزة", min_value=10, max_value=1000, value=100, step=10)
+    if st.button("🚀 حقن جيش الاختبار", type="primary"):
+        run_query(
+            "INSERT INTO myapp.users_status (device_id, phone, status, expiry_date, last_active) SELECT 'sim_' || md5(random()::text), '079' || LPAD(i::text, 7, '0'), 'Active', NOW() + interval '30 days', NOW() FROM generate_series(1, %s) AS series(i)",
+            (int(amount),),
+            is_select=False,
+        )
+        st.success("تم إنشاء أجهزة الاختبار")
 
 elif menu.startswith("📊"):
     page_header("📊 التحليل الفضائي للنشاط", "استكشف العلاقة بين النشاط والزمن والأجهزة في عرض ثلاثي الأبعاد.")
-    activity = run_query(
-        """
-        SELECT accepted_clicks AS z, phone AS x, last_active AS y
-        FROM myapp.users_status
-        WHERE accepted_clicks > 0
-        ORDER BY accepted_clicks DESC
-        LIMIT 300
-        """
-    )
+    activity = run_query("SELECT accepted_clicks AS z, phone AS x, last_active AS y FROM myapp.users_status WHERE accepted_clicks > 0 LIMIT 300")
     if activity is not None and not activity.empty:
         activity["time_idx"] = pd.to_datetime(activity["y"], errors="coerce").astype("int64") // 10**12
-        figure = px.scatter_3d(
-            activity,
-            x="x",
-            y="time_idx",
-            z="z",
-            color="z",
-            template="plotly_white",
-            labels={"x": "الهاتف", "time_idx": "الوقت", "z": "النقرات"},
-            color_continuous_scale="Turbo",
-        )
-        figure.update_layout(height=650, margin=dict(l=0, r=0, t=30, b=0), paper_bgcolor="#ffffff", plot_bgcolor="#f2f6f9", scene=dict(bgcolor="#f2f6f9", xaxis=dict(showbackground=True, backgroundcolor="#eaf7fa"), yaxis=dict(showbackground=True, backgroundcolor="#f5fafc"), zaxis=dict(showbackground=True, backgroundcolor="#eaf7fa")))
+        figure = px.scatter_3d(activity, x="x", y="time_idx", z="z", color="z", template="plotly_white")
         st.plotly_chart(figure, use_container_width=True)
-    else:
-        st.info("لا توجد بيانات نشاط كافية للعرض.")
-
-elif menu.startswith("💳"):
-    page_header("💳 إدارة الأكواد", "إنشاء أكواد تفعيل حسب الأيام والفئة، وتتبع جهاز النسخ والتفعيل وإعادة الترتيب.")
-    st.info("🔗 كل كود جديد يُحفظ في myapp.subscriptions ويعمل مباشرة عبر POST /api/subscriptions/activate وPOST /api/verify-code.")
-    section_title("1️⃣ مولّد الأكواد")
-    generator_col1, generator_col2, generator_col3 = st.columns(3)
-    with generator_col1:
-        quantity = st.number_input("عدد الأكواد", min_value=1, max_value=500, value=5, step=1, key="code_quantity")
-    with generator_col2:
-        code_days = st.number_input("عدد أيام التفعيل", min_value=1, max_value=3650, value=30, step=1, key="code_duration_days")
-    with generator_col3:
-        code_category = st.selectbox("فئة التفعيل", ["VIP", "STANDARD", "TRIAL", "PARTNER"], key="code_category")
-    generator_copy_device = st.text_input("معرّف الجهاز الذي قام بنسخ الأكواد", key="generator_copy_device", placeholder="اختياري")
-    if st.button("🎟️ توليد أكواد جديدة", type="primary"):
-        codes = [hashlib.sha256(f"{time.time_ns()}-{index}".encode()).hexdigest()[:12].upper() for index in range(int(quantity))]
-        st.session_state.generated_codes = codes
-        all_subscriptions_saved = True
-        for code in codes:
-            subscription_saved = run_query(
-                """INSERT INTO myapp.subscriptions
-                   (code, duration_days, category, payment_status, renewal_status, is_used)
-                   VALUES (%s, %s, %s, 'pending', 'new', FALSE)
-                   ON CONFLICT (code) DO NOTHING""",
-                (code, int(code_days), code_category),
-                is_select=False,
-            )
-            all_subscriptions_saved = all_subscriptions_saved and subscription_saved is not None
-            run_query(
-                """INSERT INTO myapp.activation_codes_audit
-                    (code, category, duration_days, employee_name, action, copied_by_device_id)
-                   VALUES (%s, %s, %s, %s, 'generated', %s)""",
-                (code, code_category, int(code_days), st.session_state.get("staff_name", "المدير العام"), generator_copy_device.strip() or None),
-                is_select=False,
-            )
-        if all_subscriptions_saved:
-            st.success(f"تم توليد {len(codes)} أكواد وربطها بمسار التحقق Android")
-            st.toast("أكواد التفعيل جاهزة للاستخدام", icon="🎟️")
-        else:
-            st.error("تم إيقاف اعتماد الأكواد لأن جدول الاشتراكات غير متاح")
-    generated_codes = st.session_state.get("generated_codes", [])
-    if generated_codes:
-        section_title(f"2️⃣ الأكواد الناتجة ({len(generated_codes)})")
-        generated_audit = run_query(
-            """SELECT code, category, duration_days, status, copied_by_device_id, reorder_count, created_at
-                 FROM myapp.activation_codes_audit
-                WHERE code = ANY(%s)
-                ORDER BY created_at DESC""",
-            (generated_codes,),
-        )
-        if generated_audit is not None and not generated_audit.empty:
-            codes_frame = generated_audit.rename(columns={
-                "code": "كود التفعيل", "category": "الفئة", "duration_days": "الأيام",
-                "status": "الحالة", "copied_by_device_id": "جهاز النسخ",
-                "reorder_count": "عداد إعادة الترتيب", "created_at": "تاريخ الإنشاء",
-            })
-        else:
-            codes_frame = pd.DataFrame({"كود التفعيل": generated_codes, "الحالة": "جديد", "الفئة": code_category, "الأيام": int(code_days), "جهاز النسخ": generator_copy_device or "—", "عداد إعادة الترتيب": 0, "تاريخ الإنشاء": datetime.now().strftime("%Y-%m-%d %H:%M")})
-        sort_column = st.selectbox("فرز الأكواد حسب", list(codes_frame.columns), key="codes_sort_column")
-        codes_frame = codes_frame.sort_values(sort_column).reset_index(drop=True)
-        render_table(codes_frame, height=300)
-        if st.button("🔢 إعادة ترتيب دفعة الأكواد", key="reorder_generated_codes"):
-            run_query("UPDATE myapp.activation_codes_audit SET reorder_count = reorder_count + 1, action = 'reordered', action_at = NOW() WHERE code = ANY(%s)", (generated_codes,), is_select=False)
-            st.success("تم تحديث عداد إعادة الترتيب للأكواد المحددة")
-            st.rerun()
-        st.download_button("📥 تنزيل الأكواد CSV", codes_frame.to_csv(index=False).encode("utf-8-sig"), "myclicker_codes.csv", "text/csv")
-    section_title("3️⃣ جداول حالة الأكواد")
-    subscription_status = run_query(
-        """SELECT s.code, s.category, s.duration_days, s.is_used,
-                  s.payment_status, s.renewal_status, s.used_by_device,
-                  s.used_at, s.renewed_at, a.activated_device_id, a.copied_by_device_id,
-                  a.employee_name, a.action_at
-             FROM myapp.subscriptions s
-             LEFT JOIN LATERAL (
-                 SELECT activated_device_id, copied_by_device_id, employee_name, action_at
-                   FROM myapp.activation_codes_audit
-                  WHERE code = s.code AND action = 'used'
-                  ORDER BY action_at DESC
-                  LIMIT 1
-             ) a ON TRUE
-            ORDER BY s.is_used DESC, COALESCE(s.used_at, TIMESTAMPTZ 'epoch') DESC, s.code"""
-    )
-    if subscription_status is not None and not subscription_status.empty:
-        subscription_status["حالة الكود"] = subscription_status["is_used"].map({True: "مستخدم", False: "غير مستخدم"})
-        subscription_status["جهاز التفعيل"] = subscription_status["used_by_device"].fillna(subscription_status["activated_device_id"]).fillna("—")
-        subscription_status = subscription_status.rename(columns={
-            "code": "كود التفعيل", "category": "الفئة", "duration_days": "الأيام",
-            "payment_status": "الدفع", "renewal_status": "حالة التجديد",
-            "used_at": "وقت الاستخدام", "renewed_at": "وقت التجديد", "copied_by_device_id": "جهاز النسخ",
-            "employee_name": "الموظف", "action_at": "وقت تسجيل التفعيل",
-        })
-        status_sort_options = ["وقت الاستخدام", "كود التفعيل", "الفئة", "الأيام", "جهاز التفعيل", "جهاز النسخ", "الموظف"]
-        sort_col, sort_direction = st.columns([2, 1])
-        with sort_col:
-            status_sort = st.selectbox("فرز جداول الأكواد حسب", status_sort_options, key="subscription_status_sort")
-        with sort_direction:
-            descending = st.toggle("الأحدث / الأكبر أولاً", value=True, key="subscription_status_desc")
-        status_tabs = st.tabs(["✅ الأكواد المستخدمة", "🟡 الأكواد غير المستخدمة", "📋 كل الأكواد"])
-        for status_tab, status_value in zip(status_tabs, [True, False, None]):
-            with status_tab:
-                status_frame = subscription_status if status_value is None else subscription_status[subscription_status["is_used"] == status_value]
-                status_frame = status_frame.sort_values(status_sort, ascending=not descending, na_position="last")
-                display_columns = ["كود التفعيل", "الفئة", "الأيام", "حالة الكود", "الدفع", "حالة التجديد", "جهاز التفعيل", "جهاز النسخ", "الموظف", "وقت الاستخدام", "وقت التجديد"]
-                render_table(status_frame[display_columns], height=300)
-                st.caption(f"العدد: {len(status_frame)}")
-    else:
-        st.info("لا توجد أكواد في جدول الاشتراكات بعد.")
-
-    section_title("4️⃣ جدول سجل حركة الأكواد")
-    code_search = st.text_input("🔍 ابحث عن كود أو موظف أو جهاز", key="code_audit_search")
-    audit_query = "SELECT code, category, duration_days, status, employee_name, action, device_id, activated_device_id, copied_by_device_id, reorder_count, created_at, action_at FROM myapp.activation_codes_audit"
-    audit_params: list[str] = []
-    if code_search.strip():
-        audit_query += " WHERE code ILIKE %s OR employee_name ILIKE %s OR device_id ILIKE %s OR activated_device_id ILIKE %s OR copied_by_device_id ILIKE %s"
-        pattern = f"%{code_search.strip()}%"
-        audit_params = [pattern, pattern, pattern, pattern, pattern]
-    audit_query += " ORDER BY action_at DESC LIMIT 300"
-    audit = run_query(audit_query, audit_params)
-    if audit is not None and not audit.empty:
-        audit = audit.rename(columns={"code": "الكود", "category": "التصنيف", "duration_days": "الأيام", "status": "الحالة", "employee_name": "اسم الموظف", "action": "الإجراء", "device_id": "الجهاز", "activated_device_id": "جهاز التفعيل", "copied_by_device_id": "جهاز النسخ", "reorder_count": "عداد إعادة الترتيب", "created_at": "تاريخ الإنشاء", "action_at": "وقت الإجراء"})
-        render_table(audit, height=360)
-    else:
-        st.info("لا يوجد سجل حركة للأكواد بعد.")
-    section_title("5️⃣ تسجيل حركة يدوية")
-    action_code = st.text_input("الكود", key="action_code")
-    action_type = st.selectbox("نوع الحركة", ["copied", "transferred", "used"], format_func=lambda value: {"copied": "تم نسخه", "transferred": "تم نقله", "used": "تم استخدامه"}[value], key="action_type")
-    action_device = st.text_input("الجهاز المستخدم أو المستلم", key="action_device")
-    activation_device = st.text_input("جهاز التفعيل", key="activation_device")
-    copied_by_device = st.text_input("جهاز قام بنسخ الكود", key="copied_by_device")
-    action_days = st.number_input("عدد الأيام", min_value=1, max_value=3650, value=30, step=1, key="action_days")
-    action_category = st.selectbox("فئة الكود", ["VIP", "STANDARD", "TRIAL", "PARTNER"], key="action_category")
-    if st.button("💾 تسجيل الحركة"):
-        if action_code.strip():
-            result = run_query("""INSERT INTO myapp.activation_codes_audit
-                (code, category, duration_days, status, employee_name, action, device_id, activated_device_id, copied_by_device_id)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""", (action_code.strip(), action_category, int(action_days), action_type, st.session_state.get("staff_name", "المدير العام"), action_type, action_device.strip() or None, activation_device.strip() or None, copied_by_device.strip() or None), is_select=False)
-            if result is not None:
-                st.success("تم تسجيل حركة الكود باسم الموظف والجهاز")
-                st.rerun()
 
 elif menu.startswith("🤝"):
-    page_header("🤝 قسم الشركاء والتوزيع", "إدارة الموزعين وتصنيف التوزيع ومتابعة الاشتراكات والنقرات.")
-    with st.expander("➕ إضافة شريك جديد"):
-        partner_name = st.text_input("اسم الشريك", key="partner_name")
-        partner_category = st.selectbox("تصنيف الشريك", ["MASTER", "DISTRIBUTOR", "RESELLER", "AFFILIATE"], key="partner_category")
-        commission = st.number_input("نسبة العمولة", min_value=0.0, max_value=100.0, value=0.0, step=0.5, key="partner_commission")
-        if st.button("💾 حفظ الشريك"):
-            if partner_name.strip():
-                result = run_query("INSERT INTO myapp.partners (name, category, commission) VALUES (%s, %s, %s) ON CONFLICT (name) DO UPDATE SET category=EXCLUDED.category, commission=EXCLUDED.commission, active=TRUE", (partner_name.strip(), partner_category, commission), is_select=False)
-                if result is not None:
-                    st.success("تم حفظ الشريك")
-                    st.rerun()
+    page_header("🤝 قسم الشركاء والتوزيع", "إدارة الموزعين وتصنيف التوزيع.")
     partner_list = run_query("SELECT name, category, commission, active, created_at FROM myapp.partners ORDER BY created_at DESC")
     if partner_list is not None and not partner_list.empty:
-        render_table(partner_list.rename(columns={"name": "اسم الشريك", "category": "التصنيف", "commission": "العمولة %", "active": "مفعّل", "created_at": "تاريخ الإنشاء"}), height=220)
-    partners = run_query("SELECT COALESCE(sub_tier, 'STANDARD') AS tier, COUNT(*) AS devices, COALESCE(SUM(accepted_clicks), 0) AS clicks FROM myapp.users_status GROUP BY sub_tier ORDER BY devices DESC")
-    if partners is not None and not partners.empty:
-        st.plotly_chart(px.bar(partners, x="tier", y="devices", color="clicks", template="plotly_dark", labels={"tier": "الفئة", "devices": "الأجهزة", "clicks": "النقرات"}), use_container_width=True)
-        render_table(partners, height=240)
-    else:
-        st.info("لا توجد بيانات شركاء حالياً.")
+        render_table(partner_list, height=220)
 
 elif menu.startswith("⏱️"):
-    page_header("⏱️ وقت الذروة والنشاط", "حدد الساعات والأيام التي تسجل أعلى نشاط ونقرات.")
+    page_header("⏱️ وقت الذروة والنشاط", "حدد الساعات والأيام التي تسجل أعلى نشاط.")
     peak_config = fetch_config()
-    st.markdown("### ⚙️ جدولة وقت الذروة")
-    with st.form("peak_schedule_form"):
-        schedule_days = st.multiselect("الأيام النشطة", options=list(range(7)), default=[int(day) for day in peak_config.get("peak_days", "0,1,2,3,4,5,6").split(",") if day.strip().isdigit() and 0 <= int(day) <= 6], format_func=lambda day: ["الإثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت", "الأحد"][day], key="schedule_days")
-        schedule_col1, schedule_col2 = st.columns(2)
-        with schedule_col1:
-            schedule_start = st.time_input("من الساعة", value=datetime.strptime(peak_config.get("peak_start", "18:00"), "%H:%M").time(), key="schedule_start")
-        with schedule_col2:
-            schedule_end = st.time_input("إلى الساعة", value=datetime.strptime(peak_config.get("peak_end", "23:00"), "%H:%M").time(), key="schedule_end")
-        if st.form_submit_button("💾 حفظ جدول الذروة", type="primary"):
-            if save_config({"peak_days": ",".join(str(day) for day in sorted(schedule_days)), "peak_start": schedule_start.strftime("%H:%M"), "peak_end": schedule_end.strftime("%H:%M")}):
-                st.success("تم حفظ أيام وساعات الذروة ومزامنتها مع التطبيق")
-    st.info(f"الجدول الحالي: {peak_config.get('peak_start', '18:00')} — {peak_config.get('peak_end', '23:00')} | الأيام: {peak_config.get('peak_days', '0,1,2,3,4,5,6')}")
-    peak = run_query("SELECT EXTRACT(HOUR FROM last_active)::int AS hour, COUNT(*) AS devices, COALESCE(SUM(accepted_clicks), 0) AS clicks FROM myapp.users_status WHERE last_active IS NOT NULL GROUP BY 1 ORDER BY 1")
-    if peak is not None and not peak.empty:
-        peak["الساعة"] = peak["hour"].map(lambda hour: f"{int(hour):02d}:00")
-        peak_hour = peak.loc[peak["clicks"].idxmax(), "الساعة"]
-        st.metric("ساعة الذروة", peak_hour)
-        chart = px.area(peak, x="الساعة", y="clicks", markers=True, color_discrete_sequence=["#159fbe"], labels={"الساعة": "الوقت", "clicks": "النقرات"})
-        chart.update_layout(template="plotly_white", height=430, margin=dict(l=15, r=15, t=35, b=15))
-        st.plotly_chart(chart, use_container_width=True)
-        render_table(peak[["الساعة", "devices", "clicks"]].rename(columns={"devices": "الأجهزة", "clicks": "النقرات"}), height=260)
-    else:
-        st.info("لا توجد بيانات كافية لتحليل وقت الذروة.")
+    st.info(f"الجدول الحالي: {peak_config.get('peak_start', '18:00')} — {peak_config.get('peak_end', '23:00')}")
 
 elif menu.startswith("🖥️"):
-    page_header("🖥️ حالة السيرفر", "مراقبة اتصال قاعدة البيانات وحالة خدمة MyClicker Pro.")
+    page_header("🖥️ حالة السيرفر", "مراقبة اتصال قاعدة البيانات.")
     health = run_query("SELECT NOW() AS database_time, COUNT(*) AS users FROM myapp.users_status")
-    c1, c2, c3 = st.columns(3)
-    c1.metric("قاعدة البيانات", "متصل ✅" if health is not None else "غير متصل ❌")
-    c2.metric("زمن الفحص", datetime.now().strftime("%H:%M:%S"))
-    c3.metric("عدد السجلات", f"{int(health.iloc[0]['users']):,}" if health is not None and not health.empty else "—")
     st.success("الخدمة تعمل بصورة طبيعية.") if health is not None else st.error("تعذر الوصول إلى قاعدة البيانات.")
 
 elif menu.startswith("🔐"):
-    page_header("🔐 إدارة الصلاحيات", "مراجعة أدوار المستخدمين وحدود الوصول إلى لوحة التحكم.")
-    st.markdown("### 👤 حسابات الموظفين")
-    with st.form("staff_account_form"):
-        new_username = st.text_input("اسم المستخدم الجديد")
-        new_display_name = st.text_input("اسم الموظف الظاهر")
-        new_password = st.text_input("كلمة المرور", type="password")
-        new_role = st.selectbox("الصلاحية", ["admin", "operator", "monitor"], format_func=lambda role: {"admin": "مدير النظام", "operator": "مشرف العمليات", "monitor": "مراقب"}[role])
-        if st.form_submit_button("➕ إنشاء الحساب"):
-            if new_username.strip() and new_display_name.strip() and new_password:
-                result = run_query("INSERT INTO myapp.app_staff (username, password_hash, display_name, role) VALUES (%s, %s, %s, %s) ON CONFLICT (username) DO UPDATE SET password_hash=EXCLUDED.password_hash, display_name=EXCLUDED.display_name, role=EXCLUDED.role, active=TRUE", (new_username.strip(), hashlib.sha256(new_password.encode()).hexdigest(), new_display_name.strip(), new_role), is_select=False)
-                if result is not None:
-                    st.success("تم إنشاء الحساب وتحديد الصلاحيات")
-                    st.rerun()
-            else:
-                st.warning("أكمل بيانات الحساب قبل الحفظ")
+    page_header("🔐 إدارة الصلاحيات", "مراجعة أدوار المستخدمين.")
     staff_list = run_query("SELECT username, display_name, role, active, created_at FROM myapp.app_staff ORDER BY created_at DESC")
     if staff_list is not None and not staff_list.empty:
-        render_table(staff_list.rename(columns={"username": "اسم المستخدم", "display_name": "اسم الموظف", "role": "الصلاحية", "active": "مفعّل", "created_at": "تاريخ الإنشاء"}), height=240)
-        staff_to_toggle = st.selectbox("الحساب المطلوب تفعيله أو إيقافه", staff_list["username"].astype(str).tolist())
-        if st.button("🔁 تبديل حالة الحساب"):
-            run_query("UPDATE myapp.app_staff SET active=NOT active WHERE username=%s", (staff_to_toggle,), is_select=False)
-            st.success("تم تحديث حالة الحساب")
-            st.rerun()
-    roles = pd.DataFrame({"اسم الصلاحية": ["مدير النظام", "مشرف العمليات", "مراقب"], "المشاهدة": ["كاملة", "كاملة", "كاملة"], "التعديل والحذف": ["مسموح", "مسموح", "ممنوع"], "التفعيل والاشتراكات": ["مسموح", "مسموح", "ممنوع"], "الإشعارات": ["إدارة وإرسال", "إدارة وإرسال", "مشاهدة"]})
-    render_table(roles, height=180)
-    st.info("يتم تطبيق صلاحيات العمليات الحساسة قبل تنفيذ الاستعلام في الخادم.")
+        render_table(staff_list, height=240)
 
 elif menu.startswith("📱"):
-    page_header("📱 السوشال ميديا والتواصل", "أدر روابط التواصل التي تظهر داخل التطبيق وشارك الحملات مع المستخدمين.")
+    page_header("📱 السوشال ميديا والتواصل", "أدر روابط التواصل.")
     social_config = fetch_config()
-    with st.form("social_media_form"):
-        st.markdown("### روابط الحسابات الرسمية")
-        instagram = st.text_input("Instagram", value=social_config.get("social_instagram", ""), placeholder="https://instagram.com/...")
-        facebook = st.text_input("Facebook", value=social_config.get("social_facebook", ""), placeholder="https://facebook.com/...")
-        telegram = st.text_input("Telegram", value=social_config.get("social_telegram", ""), placeholder="https://t.me/...")
-        whatsapp = st.text_input("WhatsApp", value=social_config.get("social_whatsapp", ""), placeholder="https://wa.me/...")
-        social_enabled = st.checkbox("إظهار روابط التواصل داخل التطبيق", value=social_config.get("social_enabled", "true") == "true")
-        campaign = st.text_area("رسالة الحملة الحالية", value=social_config.get("social_campaign", ""), placeholder="اكتب رسالة قصيرة للحملة أو العرض...")
-        if st.form_submit_button("💾 حفظ ومزامنة السوشال ميديا", type="primary"):
-            if save_config({"social_instagram": instagram, "social_facebook": facebook, "social_telegram": telegram, "social_whatsapp": whatsapp, "social_enabled": str(social_enabled).lower(), "social_campaign": campaign}):
-                st.success("تم حفظ روابط السوشال ميديا ومزامنتها مع التطبيق")
-    links = pd.DataFrame({"المنصة": ["Instagram", "Facebook", "Telegram", "WhatsApp"], "الرابط": [instagram, facebook, telegram, whatsapp], "الحالة": ["مفعّل" if value else "غير مضاف" for value in [instagram, facebook, telegram, whatsapp]]})
-    render_table(links, height=220)
+    st.text_input("Instagram", value=social_config.get("social_instagram", ""))
 
 elif menu.startswith("🛠️"):
-    page_header("🛠️ الدعم الفني", "أرسل ملاحظة أو طلب مساعدة إلى فريق تشغيل MyClicker Pro.")
-    subject = st.text_input("عنوان الطلب")
-    message = st.text_area("تفاصيل المشكلة", height=150)
-    if st.button("📨 إرسال الطلب", type="primary"):
-        if subject.strip() and message.strip():
-            st.success("تم تسجيل طلب الدعم بنجاح.")
-        else:
-            st.warning("أدخل العنوان والتفاصيل قبل الإرسال.")
+    page_header("🛠️ الدعم الفني", "أرسل ملاحظة أو طلب مساعدة.")
+    st.text_input("عنوان الطلب")
 
 else:
     st.warning("اختر وحدة من القائمة الجانبية.")
