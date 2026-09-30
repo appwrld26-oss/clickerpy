@@ -12,7 +12,7 @@ import streamlit as st
 
 
 # ============================================================
-# 1. إعداد الصفحة والهوية البصرية لموحة المحاسبة والتفعيلات
+# 1. إعداد الصفحة والهوية البصرية للوحة المحاسبة والتفعيلات
 # ============================================================
 st.set_page_config(
     page_title="MyClicker Pro | Accounting & Activation Portal",
@@ -102,7 +102,9 @@ st.markdown(
 # ============================================================
 # 2. ربط قاعدة البيانات (Neon PostgreSQL Connection Pool)
 # ============================================================
-DB_URL = "postgresql://neondb_owner:npg_AvzFkHQ6M3yo@ep-tiny-wind-ayd9hww0.c-5.us-east-2.aws.neon.tech/neondb?sslmode=require"
+# يقرأ من Streamlit Secrets أو يستخدم القيمة الافتراضية عند التطوير
+DEFAULT_DB_URL = "postgresql://neondb_owner:npg_AvzFkHQ6M3yo@ep-tiny-wind-ayd9hww0.c-5.us-east-2.aws.neon.tech/neondb?sslmode=require"
+DB_URL = st.secrets.get("DATABASE_URL", DEFAULT_DB_URL)
 
 
 @st.cache_resource(show_spinner=False)
@@ -142,15 +144,45 @@ def init_db_schema():
     sqls = [
         "CREATE SCHEMA IF NOT EXISTS myapp;",
         """CREATE TABLE IF NOT EXISTS myapp.activation_codes_audit (
-            id BIGSERIAL PRIMARY KEY, code TEXT UNIQUE NOT NULL, category TEXT NOT NULL DEFAULT 'STANDARD',
-            price NUMERIC(10,2) NOT NULL DEFAULT 0.0, duration_days INTEGER NOT NULL DEFAULT 30,
-            status TEXT NOT NULL DEFAULT 'generated', employee_name TEXT DEFAULT 'المدير العام',
-            action TEXT NOT NULL DEFAULT 'generated', device_id TEXT, activated_device_id TEXT,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), action_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            id BIGSERIAL PRIMARY KEY, 
+            code TEXT UNIQUE NOT NULL, 
+            category TEXT NOT NULL DEFAULT 'STANDARD',
+            price NUMERIC(10,2) NOT NULL DEFAULT 0.0, 
+            duration_days INTEGER NOT NULL DEFAULT 30,
+            status TEXT NOT NULL DEFAULT 'generated', 
+            employee_name TEXT DEFAULT 'المدير العام',
+            action TEXT NOT NULL DEFAULT 'generated', 
+            device_id TEXT, 
+            activated_device_id TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), 
+            action_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );""",
+        """CREATE TABLE IF NOT EXISTS myapp.subscriptions (
+            id BIGSERIAL PRIMARY KEY,
+            code TEXT UNIQUE NOT NULL,
+            duration_days INTEGER NOT NULL DEFAULT 30,
+            category TEXT NOT NULL DEFAULT 'STANDARD',
+            is_used BOOLEAN NOT NULL DEFAULT FALSE,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );""",
+        """CREATE TABLE IF NOT EXISTS myapp.users_status (
+            device_id TEXT PRIMARY KEY,
+            phone TEXT,
+            status TEXT DEFAULT 'Inactive',
+            sub_tier TEXT DEFAULT 'STANDARD',
+            expiry_date TIMESTAMPTZ,
+            accepted_clicks BIGINT DEFAULT 0,
+            is_frozen BOOLEAN DEFAULT FALSE,
+            last_active TIMESTAMPTZ DEFAULT NOW()
         );""",
         """CREATE TABLE IF NOT EXISTS myapp.financial_ledger (
-            id BIGSERIAL PRIMARY KEY, code TEXT, amount NUMERIC(10,2) NOT NULL,
-            category TEXT, phone TEXT, device_id TEXT, created_by TEXT DEFAULT 'المدير العام',
+            id BIGSERIAL PRIMARY KEY, 
+            code TEXT, 
+            amount NUMERIC(10,2) NOT NULL,
+            category TEXT, 
+            phone TEXT, 
+            device_id TEXT, 
+            created_by TEXT DEFAULT 'المدير العام',
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );"""
     ]
@@ -238,6 +270,7 @@ if menu.startswith("💵"):
         """
     )
     
+    v_count = s_count = t_count = 0
     if financial_data is not None and not financial_data.empty:
         f = financial_data.iloc[0]
         v_count = int(f['vip_count'])
@@ -386,16 +419,16 @@ else:
     if users_list is not None and not users_list.empty:
         st.dataframe(users_list, use_container_width=True, hide_index=True, height=280)
         
-        st.markdown("### 🛠️ أدوات التحكم بالحساب المSelected")
+        st.markdown("### 🛠️ أدوات التحكم بالحساب المحدد")
         selected_dev = st.selectbox("اختر معرّف الجهاز لتطبيق الأداة عليه", users_list["device_id"].tolist())
         
         if selected_dev:
             c_t1, c_t2, c_t3, c_t4 = st.columns(4)
             with c_t1:
-                ext_days = st.number_input("تلمديد الاشتراك (أيام)", min_value=1, max_value=365, value=30)
+                ext_days = st.number_input("تمديد الاشتراك (أيام)", min_value=1, max_value=365, value=30)
                 if st.button("➕ تمديد الاشتراك"):
                     query_db(
-                        "UPDATE myapp.users_status SET expiry_date = GREATEST(COALESCE(expiry_date, NOW()), NOW()) + (%s || ' days')::interval, status='Active', is_frozen=FALSE WHERE device_id = %s",
+                        "UPDATE myapp.users_status SET expiry_date = GREATEST(COALESCE(expiry_date, NOW()), NOW()) + (INTERVAL '1 day' * %s), status='Active', is_frozen=FALSE WHERE device_id = %s",
                         (int(ext_days), selected_dev),
                         is_select=False
                     )
