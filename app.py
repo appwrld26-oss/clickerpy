@@ -354,6 +354,7 @@ MENU_ITEMS = [
     "👥 إدارة ومراقبة المستخدمين (الأسطول)",
     "🎟️ تفعيل اشتراك يدوي فوري",
     "🤖 سجلات أداء البوت والتشخيص (Telemetry)",
+    "🩺 فحص وصحة الحزم (App Health & Packages)",
     "📢 مركز الإشعارات الشامل الكامل",
     "🚀 إدارة التحديثات الإجبارية",
     "⚡ تحديث البيانات الحية (LIVE UPDATE)",
@@ -488,9 +489,9 @@ elif menu.startswith("👥"):
     version_config = fetch_config()
     required_version = version_config.get("latest_version", "7.2.8")
     st.caption(f"النسخة المطلوبة حالياً: **v{required_version}**")
-    
+
     search = st.text_input("🔍 ابحث برقم الهاتف أو معرّف الجهاز (Device ID)")
-    
+
     col_f1, col_f2 = st.columns(2)
     with col_f1:
         filter_status = st.selectbox("تصفية حسب الحالة", ["الكل", "متصل (Online)", "غير متصل (Offline)", "مجمد (Frozen)"])
@@ -524,7 +525,7 @@ elif menu.startswith("👥"):
         base_query += " AND (users_status.phone ILIKE %s OR users_status.device_id ILIKE %s)"
         pattern = f"%{search.strip()}%"
         params.extend([pattern, pattern])
-    
+
     if filter_status == "متصل (Online)":
         base_query += " AND last_active >= NOW() - INTERVAL '5 minutes'"
     elif filter_status == "غير متصل (Offline)":
@@ -543,11 +544,10 @@ elif menu.startswith("👥"):
         st.info("لا توجد أجهزة مطابقة لخيارات البحث أو التصفية الحالية.")
     else:
         st.success(f"تم العثور على {len(users)} جهاز مطابق.")
-        
-        # إجراءات جماعية على الأجهزة المحددة
+
         section_title("⚡ إجراءات سريعة جماعية / فردية")
         selected_devices = st.multiselect("اختر معرفات الأجهزة (Device IDs) لتطبيق إجراء جماعي عليها", options=users["device_id"].tolist())
-        
+
         col_act1, col_act2, col_act3, col_act4 = st.columns(4)
         with col_act1:
             if st.button("❄️ تجميد الأجهزة المحددة") and selected_devices:
@@ -614,7 +614,7 @@ elif menu.startswith("🎟️"):
         else:
             res = run_query(
                 """
-                UPDATE myapp.users_status 
+                UPDATE myapp.users_status
                 SET status = 'Active', sub_tier = %s,
                     expiry_date = GREATEST(COALESCE(expiry_date, NOW()), NOW()) + (%s || ' days')::interval,
                     phone = COALESCE(NULLIF(%s, ''), phone), is_frozen = FALSE, activated_code = %s, last_active = NOW()
@@ -656,6 +656,27 @@ elif menu.startswith("🤖"):
             st.rerun()
     else:
         st.info("لا توجد سجلات تتبع (Telemetry) مسجلة حالياً.")
+
+elif menu.startswith("🩺"):
+    page_header("🩺 فحص وصحة الحزم (App Health & Packages)", "مراقبة حالة حزم التطبيقات (جيني وبترا) وتفعيل المنصات لكل جهاز عبر تقارير الصحة الحية.")
+    health_logs = run_query(
+        """
+        SELECT device_id, event_type,
+               details->'packages'->>'jeeny' AS jeeny_package,
+               details->'packages'->>'petra' AS petra_package,
+               details->'status'->>'jeenyEnabled' AS jeeny_enabled,
+               details->'status'->>'petraEnabled' AS petra_enabled,
+               details->'status'->>'accessibilityService' AS accessibility_status,
+               created_at
+        FROM myapp.bot_logs
+        WHERE event_type IN ('APP_HEALTH_DIAGNOSTIC_REPORT', 'MANUAL_MAIN_SCREEN_HEALTH_REPORT', 'BOT_REFRESH_AND_PACKAGE_STATUS')
+        ORDER BY created_at DESC LIMIT 250
+        """
+    )
+    if health_logs is not None and not health_logs.empty:
+        render_table(health_logs, height=500)
+    else:
+        st.info("لا توجد تقارير صحة حزم مسجلة حتى الآن. سيتم عرضها فور إرسالها من الأجهزة أو المحاكي.")
 
 elif menu.startswith("📢"):
     page_header("📢 مركز الإشعارات الشامل الكامل", "أرسل تنبيهات فورية أو منسدلة للأجهزة المتصلة.")
@@ -733,4 +754,4 @@ else:
             (int(count_sim),),
             is_select=False,
         )
-        st.success(f"تم حقن {count_sim} جهاز محاكاة وهمي بنجاح.")
+        st.success(f"حقن {count_sim} جهاز محاكاة وهمي بنجاح.")
