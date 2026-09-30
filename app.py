@@ -12,7 +12,7 @@ import streamlit as st
 
 
 # ============================================================
-# 1. إعداد الصفحة والهوية البصرية للوحة التحكم (Theme Configuration)
+# 1. إعداد الصفحة والهوية البصرية للوحة التحكم (Light Theme)
 # ============================================================
 st.set_page_config(
     page_title="MyClicker Pro | Accounting & Activation Portal",
@@ -21,24 +21,24 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# نمط المظهر النهائي المستحدث (تنسيق أنيق وعصري قابل للتخصيص)
+# نمط المظهر المضيء/الفاتح (Light Theme CSS)
 st.markdown(
     """
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&display=swap');
 
     :root {
-        --bg: #0f172a;        /* خلفية التطبيق العامة */
-        --panel: #1e293b;     /* خلفية البطاقات والجداول */
-        --panel-soft: #0b1329;
-        --line: #334155;      /* لون الحدود والفاصل */
-        --cyan: #38bdf8;
-        --green: #10b981;
-        --orange: #f97316;
-        --purple: #a855f7;
-        --red: #ef4444;
-        --text: #f8fafc;      /* لون النصوص الأساسية */
-        --muted: #94a3b8;     /* لون النصوص الثانوية */
+        --bg: #f8fafc;        /* خلفية التطبيق الفاتحة */
+        --panel: #ffffff;     /* خلفية البطاقات والجداول */
+        --panel-soft: #f1f5f9;
+        --line: #e2e8f0;      /* لون الحدود والفاصل الفاتح */
+        --cyan: #0284c7;      /* أزرق داكن/واضح للخلفية الفاتحة */
+        --green: #059669;
+        --orange: #ea580c;
+        --purple: #9333ea;
+        --red: #dc2626;
+        --text: #0f172a;      /* لون النصوص الأساسية (داكن) */
+        --muted: #64748b;     /* لون النصوص الثانوية */
         --radius-lg: 20px;
     }
 
@@ -58,16 +58,16 @@ st.markdown(
     }
 
     [data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #0f172a 0%, #020617 100%);
+        background: linear-gradient(180deg, #ffffff 0%, #f1f5f9 100%);
         border-left: 1px solid var(--line);
     }
 
     .hero {
         padding: 1.8rem;
-        border: 1px solid rgba(56, 189, 248, 0.3);
+        border: 1px solid rgba(2, 132, 199, 0.2);
         border-radius: var(--radius-lg);
-        background: linear-gradient(135deg, #0f172a, #1e293b);
-        box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        background: linear-gradient(135deg, #ffffff, #f1f5f9);
+        box-shadow: 0 10px 25px rgba(0,0,0,0.05);
         margin-bottom: 1.5rem;
     }
 
@@ -76,7 +76,7 @@ st.markdown(
         border: 1px solid var(--line);
         border-radius: 16px;
         background: var(--panel);
-        box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        box-shadow: 0 4px 15px rgba(0,0,0,0.03);
     }
 
     .stButton > button {
@@ -93,6 +93,7 @@ st.markdown(
         border: 1px solid var(--line);
         border-radius: 14px;
         overflow: hidden;
+        background-color: var(--panel);
     }
     </style>
     """,
@@ -228,15 +229,15 @@ if not st.session_state.gm_auth:
 # 4. القائمة الرئيسية
 # ============================================================
 with st.sidebar:
-    st.markdown("<h2 style='text-align:center;color:#38bdf8;'>💰 لوحة المحاسبة</h2>", unsafe_allow_html=True)
-    st.markdown(f"<p style='text-align:center;color:#94a3b8;'>المشرف: {st.session_state.gm_user}</p>", unsafe_allow_html=True)
+    st.markdown("<h2 style='text-align:center;color:#0284c7;'>💰 لوحة المحاسبة</h2>", unsafe_allow_html=True)
+    st.markdown(f"<p style='text-align:center;color:#64748b;'>المشرف: {st.session_state.gm_user}</p>", unsafe_allow_html=True)
     st.divider()
     
     menu = st.radio(
         "الأقسام الرئيسية",
         [
             "💵 المحاسبة والتقارير المالية",
-            "🎟️ توليد وإدارة أكواد التفعيل (GM)",
+            "🎟️️ توليد وإدارة أكواد التفعيل (GM)",
             "📈 إحصائيات الأسطول والمستخدمين",
             "👤 إدارة المستخدمين وأدواتهم",
         ],
@@ -290,8 +291,8 @@ if menu.startswith("💵"):
         "الفئة": ["VIP (25 د.أ)", "STANDARD (15 د.أ)", "TRIAL (مجاني)"],
         "العدد": [v_count, s_count, t_count]
     })
-    fig = px.pie(pie_df, names="الفئة", values="العدد", color="الفئة", color_discrete_sequence=["#a855f7", "#38bdf8", "#64748b"], hole=0.4)
-    fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font_color="#f8fafc")
+    fig = px.pie(pie_df, names="الفئة", values="العدد", color="الفئة", color_discrete_sequence=["#9333ea", "#0284c7", "#94a3b8"], hole=0.4)
+    fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font_color="#0f172a")
     st.plotly_chart(fig, use_container_width=True)
 
     st.markdown("### 📜 دفتر القيود المالية والتفعيل")
