@@ -12,7 +12,7 @@ import streamlit as st
 
 
 # ============================================================
-# 1. إعداد الصفحة والهوية البصرية للوحة المحاسبة والتفعيلات
+# 1. إعداد الصفحة والهوية البصرية للوحة التحكم (Theme Configuration)
 # ============================================================
 st.set_page_config(
     page_title="MyClicker Pro | Accounting & Activation Portal",
@@ -21,23 +21,24 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# نمط المظهر النهائي المستحدث (تنسيق أنيق وعصري قابل للتخصيص)
 st.markdown(
     """
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&display=swap');
 
     :root {
-        --bg: #0b1120;
-        --panel: #1e293b;
-        --panel-soft: #0f172a;
-        --line: #334155;
+        --bg: #0f172a;        /* خلفية التطبيق العامة */
+        --panel: #1e293b;     /* خلفية البطاقات والجداول */
+        --panel-soft: #0b1329;
+        --line: #334155;      /* لون الحدود والفاصل */
         --cyan: #38bdf8;
         --green: #10b981;
         --orange: #f97316;
         --purple: #a855f7;
         --red: #ef4444;
-        --text: #f8fafc;
-        --muted: #94a3b8;
+        --text: #f8fafc;      /* لون النصوص الأساسية */
+        --muted: #94a3b8;     /* لون النصوص الثانوية */
         --radius-lg: 20px;
     }
 
@@ -102,7 +103,6 @@ st.markdown(
 # ============================================================
 # 2. ربط قاعدة البيانات (Neon PostgreSQL Connection Pool)
 # ============================================================
-# يقرأ من Streamlit Secrets أو يستخدم القيمة الافتراضية عند التطوير
 DEFAULT_DB_URL = "postgresql://neondb_owner:npg_AvzFkHQ6M3yo@ep-tiny-wind-ayd9hww0.c-5.us-east-2.aws.neon.tech/neondb?sslmode=require"
 DB_URL = st.secrets.get("DATABASE_URL", DEFAULT_DB_URL)
 
@@ -277,7 +277,6 @@ if menu.startswith("💵"):
         s_count = int(f['standard_count'])
         t_count = int(f['trial_count'])
         
-        # تقدير المبيعات بناءً على أسعار الباقات الافتراضية
         est_revenue = (v_count * 25.0) + (s_count * 15.0)
         
         m1, m2, m3, m4 = st.columns(4)
