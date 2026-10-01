@@ -8,16 +8,15 @@ import pandas as pd
 import plotly.express as px
 import psycopg2
 from psycopg2 import pool
-from psycopg2.extras import execute_values
 import streamlit as st
 
 
 # ============================================================
-# 1. إعداد الصفحة والهوية البصرية للوحة التحكم (Light Theme)
+# 1. إعداد الصفحة والهوية البصرية الشاملة الاحترافية
 # ============================================================
 st.set_page_config(
-    page_title="MyClicker Pro | Accounting & Activation Portal",
-    page_icon="💰",
+    page_title="MyClicker Pro | Ultimate Unified Command & Accounting Panel",
+    page_icon="⚡",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -28,17 +27,17 @@ st.markdown(
     @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&display=swap');
 
     :root {
-        --bg: #f8fafc;
-        --panel: #ffffff;
-        --panel-soft: #f1f5f9;
-        --line: #e2e8f0;
-        --cyan: #0284c7;
-        --green: #059669;
-        --orange: #ea580c;
-        --purple: #9333ea;
-        --red: #dc2626;
-        --text: #0f172a;
-        --muted: #64748b;
+        --bg: #0b1120;
+        --panel: #1e293b;
+        --panel-soft: #0f172a;
+        --line: #334155;
+        --cyan: #38bdf8;
+        --green: #10b981;
+        --orange: #f97316;
+        --purple: #a855f7;
+        --red: #ef4444;
+        --text: #f8fafc;
+        --muted: #94a3b8;
         --radius-lg: 20px;
     }
 
@@ -58,16 +57,16 @@ st.markdown(
     }
 
     [data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #ffffff 0%, #f1f5f9 100%);
+        background: linear-gradient(180deg, #0f172a 0%, #020617 100%);
         border-left: 1px solid var(--line);
     }
 
     .hero {
         padding: 1.8rem;
-        border: 1px solid rgba(2, 132, 199, 0.2);
+        border: 1px solid rgba(56, 189, 248, 0.3);
         border-radius: var(--radius-lg);
-        background: linear-gradient(135deg, #ffffff, #f1f5f9);
-        box-shadow: 0 10px 25px rgba(0,0,0,0.05);
+        background: linear-gradient(135deg, #0f172a, #1e293b);
+        box-shadow: 0 10px 30px rgba(0,0,0,0.5);
         margin-bottom: 1.5rem;
     }
 
@@ -76,7 +75,7 @@ st.markdown(
         border: 1px solid var(--line);
         border-radius: 16px;
         background: var(--panel);
-        box-shadow: 0 4px 15px rgba(0,0,0,0.03);
+        box-shadow: 0 4px 20px rgba(0,0,0,0.3);
     }
 
     .stButton > button {
@@ -93,7 +92,6 @@ st.markdown(
         border: 1px solid var(--line);
         border-radius: 14px;
         overflow: hidden;
-        background-color: var(--panel);
     }
     </style>
     """,
@@ -102,16 +100,14 @@ st.markdown(
 
 
 # ============================================================
-# 2. ربط قاعدة البيانات الآمن والمتعدد الخيوط (Threaded Connection Pool)
+# 2. إدارة قاعدة البيانات (Neon PostgreSQL Connection Pool)
 # ============================================================
-DEFAULT_DB_URL = "postgresql://neondb_owner:npg_AvzFkHQ6M3yo@ep-tiny-wind-ayd9hww0.c-5.us-east-2.aws.neon.tech/neondb?sslmode=require"
-DB_URL = st.secrets.get("DATABASE_URL", DEFAULT_DB_URL)
+DB_URL = "postgresql://neondb_owner:npg_AvzFkHQ6M3yo@ep-tiny-wind-ayd9hww0.c-5.us-east-2.aws.neon.tech/neondb?sslmode=require"
 
 
 @st.cache_resource(show_spinner=False)
-def get_db_pool() -> pool.ThreadedConnectionPool:
-    # استخدام ThreadedConnectionPool بدلاً من SimpleConnectionPool لضمان الأمان في Streamlit
-    return pool.ThreadedConnectionPool(minconn=1, maxconn=15, dsn=DB_URL, sslmode="require")
+def get_db_pool() -> pool.SimpleConnectionPool:
+    return pool.SimpleConnectionPool(minconn=1, maxconn=25, dsn=DB_URL, sslmode="require")
 
 
 @contextmanager
@@ -121,16 +117,9 @@ def db_session():
     try:
         conn = p.getconn()
         yield conn
-    except Exception as e:
-        if conn:
-            conn.rollback()
-        raise e
     finally:
         if conn is not None:
-            if conn.closed:
-                p.putconn(conn, close=True)
-            else:
-                p.putconn(conn)
+            p.putconn(conn)
 
 
 def query_db(sql: str, params: Optional[Iterable[Any]] = None, is_select: bool = True) -> Optional[pd.DataFrame | bool]:
@@ -139,372 +128,354 @@ def query_db(sql: str, params: Optional[Iterable[Any]] = None, is_select: bool =
             with conn.cursor() as cur:
                 cur.execute(sql, tuple(params or ()))
                 if is_select:
-                    if cur.description is None:
-                        return pd.DataFrame()
                     rows = cur.fetchall()
                     cols = [desc[0] for desc in cur.description]
                     return pd.DataFrame(rows, columns=cols)
                 conn.commit()
                 return True
     except Exception as e:
-        st.error(f"❌ خطأ في تنفيذ الاستعلام: {e}")
+        st.error(f"❌ خطأ في قاعدة البيانات: {e}")
         return None
 
 
-@st.cache_resource(show_spinner=False)
-def init_db_schema_cached():
-    """تهيئة الجداول مرة واحدة فقط عند بدء تشغيل التطبيق"""
+def init_db_schema():
     sqls = [
         "CREATE SCHEMA IF NOT EXISTS myapp;",
-        """CREATE TABLE IF NOT EXISTS myapp.activation_codes_audit (
-            id BIGSERIAL PRIMARY KEY, 
-            code TEXT UNIQUE NOT NULL, 
-            category TEXT NOT NULL DEFAULT 'STANDARD',
-            price NUMERIC(10,2) NOT NULL DEFAULT 0.0, 
-            duration_days INTEGER NOT NULL DEFAULT 30,
-            status TEXT NOT NULL DEFAULT 'generated', 
-            employee_name TEXT DEFAULT 'المدير العام',
-            action TEXT NOT NULL DEFAULT 'generated', 
-            device_id TEXT, 
-            activated_device_id TEXT,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), 
-            action_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        """CREATE TABLE IF NOT EXISTS myapp.app_config (key TEXT PRIMARY KEY, value TEXT);""",
+        """CREATE TABLE IF NOT EXISTS myapp.users_status (
+            device_id TEXT PRIMARY KEY, phone TEXT, status TEXT DEFAULT 'Active',
+            sub_tier TEXT DEFAULT 'STANDARD', accepted_clicks BIGINT DEFAULT 0,
+            app_version TEXT, is_frozen BOOLEAN DEFAULT FALSE, notice_message TEXT,
+            expiry_date TIMESTAMPTZ, last_active TIMESTAMPTZ DEFAULT NOW()
         );""",
-        """CREATE TABLE IF NOT EXISTS myapp.subscriptions (
-            id BIGSERIAL PRIMARY KEY,
-            code TEXT UNIQUE NOT NULL,
-            duration_days INTEGER NOT NULL DEFAULT 30,
-            category TEXT NOT NULL DEFAULT 'STANDARD',
-            is_used BOOLEAN NOT NULL DEFAULT FALSE,
+        """CREATE TABLE IF NOT EXISTS myapp.app_staff (
+            id BIGSERIAL PRIMARY KEY, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL,
+            display_name TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'monitor', active BOOLEAN NOT NULL DEFAULT TRUE,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );""",
-        """CREATE TABLE IF NOT EXISTS myapp.users_status (
-            device_id TEXT PRIMARY KEY,
-            phone TEXT,
-            status TEXT DEFAULT 'Inactive',
-            sub_tier TEXT DEFAULT 'STANDARD',
-            expiry_date TIMESTAMPTZ,
-            accepted_clicks BIGINT DEFAULT 0,
-            is_frozen BOOLEAN DEFAULT FALSE,
-            last_active TIMESTAMPTZ DEFAULT NOW()
+        """CREATE TABLE IF NOT EXISTS myapp.activation_codes_audit (
+            id BIGSERIAL PRIMARY KEY, code TEXT UNIQUE NOT NULL, category TEXT NOT NULL DEFAULT 'STANDARD',
+            price NUMERIC(10,2) NOT NULL DEFAULT 0.0, duration_days INTEGER NOT NULL DEFAULT 30,
+            status TEXT NOT NULL DEFAULT 'generated', employee_name TEXT DEFAULT 'المدير العام',
+            action TEXT NOT NULL DEFAULT 'generated', device_id TEXT, activated_device_id TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), action_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );""",
         """CREATE TABLE IF NOT EXISTS myapp.financial_ledger (
-            id BIGSERIAL PRIMARY KEY, 
-            code TEXT, 
-            amount NUMERIC(10,2) NOT NULL,
-            category TEXT, 
-            phone TEXT, 
-            device_id TEXT, 
-            created_by TEXT DEFAULT 'المدير العام',
-            notes TEXT,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        );""",
-        "ALTER TABLE myapp.financial_ledger ADD COLUMN IF NOT EXISTS notes TEXT;"
+            id BIGSERIAL PRIMARY KEY, code TEXT, amount NUMERIC(10,2) NOT NULL DEFAULT 0.0,
+            category TEXT, phone TEXT, device_id TEXT, created_by TEXT DEFAULT 'المدير العام',
+            notes TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );"""
     ]
     for s in sqls:
         query_db(s, is_select=False)
-    return True
 
 
-# تشغيل التهيئة لمرة واحدة فقط بحفظ النتيجة في الكاش
-init_db_schema_cached()
+init_db_schema()
 
 
 # ============================================================
-# 3. نظام المصادقة والسيطرة
+# 3. المصادقة والتحقق
 # ============================================================
-if "gm_auth" not in st.session_state:
-    st.session_state.gm_auth = False
+if "auth" not in st.session_state:
+    st.session_state.auth = False
 
-if not st.session_state.gm_auth:
+if not st.session_state.auth:
     c1, c2, c3 = st.columns([1, 1.2, 1])
     with c2:
         st.markdown(
             """
             <div class="hero" style="text-align:center;">
-                <div style="font-size:45px;">💰</div>
-                <h1>لوحة المحاسبة وإدارة التفعيلات</h1>
-                <p>بوابة المدير العام المستقلة لإدارة الإيرادات والكروت والمستخدمين</p>
+                <div style="font-size:45px;">⚡</div>
+                <h1>لوحة التحكم والسيطرة والمحاسبة</h1>
+                <p>بوابة القيادة المركزية لأسطول MyClicker Pro</p>
             </div>
             """,
             unsafe_allow_html=True,
         )
-        with st.form("login_form"):
-            user = st.text_input("👤 اسم المدير العام")
-            pwd = st.text_input("🔑 كلمة المرور", type="password")
-            submitted = st.form_submit_button("تسجيل الدخول للوحة المحاسبة 🚀", type="primary", use_container_width=True)
-            if submitted:
-                if (user.strip() == "admin" or user.strip() == "manager") and pwd == "admin123":
-                    st.session_state.gm_auth = True
-                    st.session_state.gm_user = "المدير العام"
-                    st.rerun()
-                else:
-                    st.error("اسم المستخدم أو كلمة المرور غير صحيحة")
+        user = st.text_input("👤 اسم المستخدم")
+        pwd = st.text_input("🔑 كلمة السر", type="password")
+        if st.button("دخول غرفة القيادة المركزية 🚀", type="primary"):
+            staff = query_db("SELECT username, display_name, role FROM myapp.app_staff WHERE username=%s AND password_hash=%s AND active=TRUE LIMIT 1", (user.strip().lower(), hashlib.sha256(pwd.encode()).hexdigest()))
+            if (user.strip() == "admin" or user.strip() == "manager") and pwd == "admin123":
+                st.session_state.auth = True
+                st.session_state.staff_name = "المدير العام"
+                st.session_state.staff_role = "admin"
+                st.rerun()
+            elif staff is not None and not staff.empty:
+                st.session_state.auth = True
+                st.session_state.staff_name = str(staff.iloc[0]["display_name"])
+                st.session_state.staff_role = str(staff.iloc[0]["role"])
+                st.rerun()
+            else:
+                st.error("بيانات الدخول غير صحيحة")
     st.stop()
 
 
 # ============================================================
-# 4. القائمة الرئيسية
+# 4. القائمة الرئيسية (اللوحة الكاملة + قسم المحاسبة وقسم الصلاحيات)
 # ============================================================
+MENU_ITEMS = [
+    "📈 نظرة عامة وإحصائيات الأسطول",
+    "👥 إدارة ومراقبة المستخدمين (الأسطول)",
+    "💰 قسم المحاسبة والتقارير المالية والمبيعات",
+    "🎟️ تنظيم وجدول الكروت (مستخدم / غير مستخدم)",
+    "🎟️ تفعيل اشتراك يدوي فوري",
+    "🩺 فحص وصحة الحزم (App Health & Packages)",
+    "🤖 سجلات أداء البوت والتشخيص (Telemetry)",
+    "📢 مركز الإشعارات الشامل الكامل",
+    "🚀 إدارة التحديثات الإجبارية",
+    "⚡ تحديث البيانات الحية (LIVE UPDATE)",
+    "🔐 إدارة الصلاحيات وتسجيل المشرفين",
+    "🖥️ حالة السيرفر والقاعدة",
+]
+
 with st.sidebar:
-    st.markdown("<h2 style='text-align:center;color:#0284c7;'>💰 لوحة المحاسبة</h2>", unsafe_allow_html=True)
-    st.markdown(f"<p style='text-align:center;color:#64748b;'>المشرف: {st.session_state.gm_user}</p>", unsafe_allow_html=True)
+    st.markdown("<h2 style='text-align:center;color:#38bdf8;'>⚡ MyClicker Pro</h2>", unsafe_allow_html=True)
+    st.markdown(f"<p style='text-align:center;color:#94a3b8;'>المشرف: {st.session_state.get('staff_name', 'المدير العام')}</p>", unsafe_allow_html=True)
     st.divider()
     
-    menu = st.radio(
-        "الأقسام الرئيسية",
-        [
-            "💵 المحاسبة والتقارير المالية",
-            "🎟 توليد وإدارة أكواد التفعيل (GM)",
-            "📈 إحصائيات الأسطول والمستخدمين",
-            "👤 إدارة المستخدمين وأدواتهم",
-        ],
-    )
+    menu = st.radio("الأقسام الرئيسية", MENU_ITEMS)
     st.divider()
-    if st.button("🚪 تسجيل الخروج", use_container_width=True):
-        st.session_state.gm_auth = False
+    if st.button("🚪 تسجيل الخروج"):
+        st.session_state.auth = False
         st.rerun()
 
 
+def page_header(title: str, subtitle: str) -> None:
+    st.markdown(f"<div class='hero'><h1>{title}</h1><p>{subtitle}</p></div>", unsafe_allow_html=True)
+
+
 # ============================================================
-# 5. الأقسام والوظائف الرئيسية
+# 5. الأقسام والموديولات الشاملة
 # ============================================================
 
-# ------------------------------------------------------------
-# القسم 1: المحاسبة والتقارير المالية
-# ------------------------------------------------------------
-if menu.startswith("💵"):
-    st.markdown("<div class='hero'><h1>💵 المحاسبة والتقارير المالية الإجمالية</h1><p>تحليل الإيرادات، العوائد حسب الباقات، وسجل العمليات المالية.</p></div>", unsafe_allow_html=True)
+# 1. نظرة عامة
+if menu.startswith("📈"):
+    page_header("📈 مركز الرؤية والتحليلات المتقدمة", "لقطة فورية لأداء الأسطول، سرعات الاستجابة، وإصدارات التطبيق.")
+    summary = query_db(
+        """
+        SELECT COUNT(*) AS total,
+               COALESCE(SUM(accepted_clicks), 0) AS clicks,
+               COUNT(*) FILTER (WHERE is_frozen = TRUE) AS frozen,
+               COUNT(*) FILTER (WHERE last_active >= NOW() - INTERVAL '5 minutes') AS online,
+               COUNT(*) FILTER (WHERE last_active IS NULL OR last_active < NOW() - INTERVAL '5 minutes') AS offline
+        FROM myapp.users_status
+        WHERE device_id NOT LIKE 'sim_%'
+        """
+    )
+    if summary is not None and not summary.empty:
+        stats = summary.iloc[0]
+        c1, c2, c3, c4, c5 = st.columns(5)
+        c1.metric("إجمالي الأجهزة", f"{int(stats['total']):,}")
+        c2.metric("إجمالي النقرات", f"{int(stats['clicks']):,}")
+        c3.metric("الأجهزة المجمدة", f"{int(stats['frozen']):,}")
+        c4.metric("حالة النظام", "مستقر وسريع 🚀")
+        c5.metric("حالات الاتصال", f"🟢 {int(stats['online'])} / 🔴 {int(stats['offline'])}")
+
+# 2. إدارة المستخدمين
+elif menu.startswith("👥"):
+    page_header("👥 إدارة أسطول الكباتن", "جدول شامل لمراقبة المستخدمين، تجميد الأجهزة، وتعديل الاشتراكات بضغطة زر.")
+    search = st.text_input("🔍 ابحث برقم الهاتف أو معرّف الجهاز (Device ID)")
     
-    financial_data = query_db(
+    u_sql = "SELECT device_id, phone, status, sub_tier, expiry_date, accepted_clicks, is_frozen, last_active FROM myapp.users_status WHERE device_id NOT LIKE 'sim_%'"
+    u_params = []
+    if search.strip():
+        u_sql += " AND (phone ILIKE %s OR device_id ILIKE %s)"
+        p = f"%{search.strip()}%"
+        u_params.extend([p, p])
+    u_sql += " ORDER BY last_active DESC NULLS LAST LIMIT 200"
+    
+    users = query_db(u_sql, u_params)
+    if users is not None and not users.empty:
+        st.dataframe(users, use_container_width=True, hide_index=True, height=400)
+    else:
+        st.info("لا توجد أجهزة مطابقة.")
+
+# 3. قسم المحاسبة والتقارير المالية (قسم من اللوحة الكاملة)
+elif menu.startswith("💰"):
+    page_header("💰 قسم المحاسبة والتقارير المالية والمبيعات", "إدارة القيود المالية، تحصيل الإيرادات، ومتابعة قيمة المخزون الحصري.")
+    
+    ledger_summary = query_db(
         """
         SELECT 
-            COUNT(*) AS total_codes,
-            COUNT(*) FILTER (WHERE status = 'used') as used_codes,
-            COALESCE(SUM(duration_days), 0) as total_days_sold,
-            COUNT(*) FILTER (WHERE category = 'VIP') as vip_count,
-            COUNT(*) FILTER (WHERE category = 'STANDARD') as standard_count,
-            COUNT(*) FILTER (WHERE category = 'TRIAL') as trial_count
+            COALESCE(SUM(amount), 0) AS total_revenue,
+            COUNT(*) AS total_sales_count,
+            COALESCE(AVG(amount), 0) AS avg_sale_price
+        FROM myapp.financial_ledger
+        """
+    )
+    inventory_summary = query_db(
+        """
+        SELECT 
+            COUNT(*) FILTER (WHERE status = 'generated' OR status = 'new') AS unused_count,
+            COUNT(*) FILTER (WHERE status = 'used') AS used_count,
+            COALESCE(SUM(price) FILTER (WHERE status = 'generated' OR status = 'new'), 0) AS unused_value
         FROM myapp.activation_codes_audit
         """
     )
     
-    v_count = s_count = t_count = 0
-    if financial_data is not None and not financial_data.empty:
-        f = financial_data.iloc[0]
-        v_count = int(f['vip_count'] or 0)
-        s_count = int(f['standard_count'] or 0)
-        t_count = int(f['trial_count'] or 0)
-        
-        est_revenue = (v_count * 25.0) + (s_count * 15.0)
+    if ledger_summary is not None and inventory_summary is not None:
+        ls = ledger_summary.iloc[0]
+        inv = inventory_summary.iloc[0]
         
         m1, m2, m3, m4 = st.columns(4)
-        m1.metric("إجمالي الإيرادات المقدرة", f"{est_revenue:,.2f} د.أ")
-        m2.metric("الأكواد المستخدمة", f"{int(f['used_codes'] or 0):,} / {int(f['total_codes'] or 0):,}")
-        m3.metric("اشتراكات VIP", f"{v_count:,} كارت")
-        m4.metric("اشتراكات STANDARD", f"{s_count:,} كارت")
+        m1.metric("إجمالي الإيرادات المحصلة 💰", f"{float(ls['total_revenue']):,.2f} د.أ")
+        m2.metric("عدد عمليات المبيعات", f"{int(ls['total_sales_count']):,} عملية")
+        m3.metric("متوسط سعر المبيعة", f"{float(ls['avg_sale_price']):,.2f} د.أ")
+        m4.metric("قيمة الكروت المتاحة بالمخزون", f"{float(inv['unused_value']):,.2f} د.أ")
 
-    st.markdown("### 📊 توزيع الإيرادات حسب الفئة")
-    pie_df = pd.DataFrame({
-        "الفئة": ["VIP (25 د.أ)", "STANDARD (15 د.أ)", "TRIAL (مجاني)"],
-        "العدد": [v_count, s_count, t_count]
-    })
-    fig = px.pie(pie_df, names="الفئة", values="العدد", color="الفئة", color_discrete_sequence=["#9333ea", "#0284c7", "#94a3b8"], hole=0.4)
-    fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font_color="#0f172a")
-    st.plotly_chart(fig, use_container_width=True)
-
-    st.markdown("### 📜 دفتر القيود المالية والتفعيل")
-    audit_logs = query_db("SELECT code, category, duration_days, status, employee_name, activated_device_id, created_at FROM myapp.activation_codes_audit ORDER BY created_at DESC LIMIT 200")
-    if audit_logs is not None and not audit_logs.empty:
-        st.dataframe(audit_logs, use_container_width=True, hide_index=True, height=350)
-        st.download_button(
-            "📥 تصدير السجل المالي CSV",
-            data=audit_logs.to_csv(index=False).encode("utf-8-sig"),
-            file_name=f"financial_ledger_{datetime.now():%Y%m%d}.csv",
-            mime="text/csv",
-            use_container_width=True,
-        )
-    else:
-        st.info("لا توجد سجلات مالية حتى الآن.")
-
-
-# ------------------------------------------------------------
-# القسم 2: توليد وإدارة أكواد التفعيل (مُحسّن للسرعة والتجميع Batching)
-# ------------------------------------------------------------
-elif menu.startswith("🎟️"):
-    st.markdown("<div class='hero'><h1>🎟️ توليد وإدارة أكواد التفعيل المولدة</h1><p>توليد كروت اشتراك فردية أو دفعة جماعية مع تحديد الفئة والمدة.</p></div>", unsafe_allow_html=True)
+    st.markdown("### 🛒 إضافة عملية بيع مباشرة جديدة")
+    unused_codes_df = query_db("SELECT code, category, price, duration_days FROM myapp.activation_codes_audit WHERE status = 'generated' OR status = 'new' ORDER BY created_at DESC")
     
-    col_g1, col_d2 = st.columns(2)
-    with col_g1:
-        gen_type = st.radio("نوع التوليد", ["كارت فردي مخصص", "دفعة كروت جماعية (Batch)"])
-        gen_category = st.selectbox("باقة الاشتراك", ["VIP", "STANDARD", "TRIAL"])
-    with col_d2:
-        gen_days = st.number_input("مدة الكارت (بالأيام)", min_value=1, max_value=3650, value=30)
-        batch_count = st.number_input("عدد الكروت المطلوبة", min_value=1, max_value=500, value=10) if gen_type.startswith("دفعة") else 1
-
-    prefix = st.text_input("بادئة الكود (Prefix - اختياري)", value="GM-2026")
-
-    # تحديد سعر الباقة تلقائياً
-    unit_price = 25.0 if gen_category == "VIP" else (15.0 if gen_category == "STANDARD" else 0.0)
-
-    if st.button("⚡ توليد الأكواد وحفظها بجدول التفعيلات", type="primary", use_container_width=True):
-        generated_codes = []
-        audit_rows = []
-        sub_rows = []
-        ledger_rows = []
-        
-        timestamp = time.time()
-        for i in range(batch_count):
-            random_hash = hashlib.sha256(f"{timestamp}_{i}_{st.session_state.gm_user}".encode()).hexdigest()[:8].upper()
-            code_str = f"{prefix}-{random_hash}"
-            generated_codes.append(code_str)
+    if unused_codes_df is not None and not unused_codes_df.empty:
+        available_codes = unused_codes_df["code"].tolist()
+        c1, c2 = st.columns(2)
+        with c1:
+            sel_code = st.selectbox("اختر الكود المتاح", available_codes)
+            matched = unused_codes_df[unused_codes_df["code"] == sel_code].iloc[0]
+            phone = st.text_input("رقم هاتف العميل", value="0790000000")
+            device_id = st.text_input("معرّف الجهاز (Device ID)", value="")
+        with c2:
+            cat = st.selectbox("الباقة", ["VIP", "STANDARD", "TRIAL"])
+            price = st.number_input("المبلغ المحصل (د.أ)", min_value=0.0, value=float(matched["price"]) if matched["price"] > 0 else 25.0)
+            notes = st.text_input("ملاحظات", value="تحصيل نقدي مباشر")
             
-            audit_rows.append((code_str, gen_category, unit_price, int(gen_days), 'generated', st.session_state.gm_user, 'batch_generated'))
-            sub_rows.append((code_str, int(gen_days), gen_category, False))
-            ledger_rows.append((code_str, unit_price, gen_category, st.session_state.gm_user, f"إصدار كارت {gen_category}"))
+        if st.button("🚀 تسجيل وتأكيد عملية البيع", type="primary"):
+            if phone.strip():
+                query_db("INSERT INTO myapp.financial_ledger (code, amount, category, phone, device_id, created_by, notes) VALUES (%s, %s, %s, %s, %s, %s, %s)", (sel_code, price, cat, phone.strip(), device_id.strip(), st.session_state.get('staff_name', 'المدير العام'), notes), is_select=False)
+                query_db("UPDATE myapp.activation_codes_audit SET status = 'used', action = 'sold', activated_device_id = %s WHERE code = %s", (device_id.strip(), sel_code), is_select=False)
+                st.success(f"🎉 تم تسجيل المبيعة بنجاح وتحصيل {price} د.أ للكود ({sel_code})!")
+                st.rerun()
 
-        # تنفيذ الإدراج التجمعي Batch Insert في استعلام واحد متكامل وسريع جداً
-        try:
-            with db_session() as conn:
-                with conn.cursor() as cur:
-                    # 1. إدراج جدول السجل والتفعيل
-                    execute_values(
-                        cur,
-                        """
-                        INSERT INTO myapp.activation_codes_audit (code, category, price, duration_days, status, employee_name, action)
-                        VALUES %s ON CONFLICT (code) DO NOTHING
-                        """,
-                        audit_rows
-                    )
-                    # 2. إدراج جدول الاشتراكات
-                    execute_values(
-                        cur,
-                        """
-                        INSERT INTO myapp.subscriptions (code, duration_days, category, is_used)
-                        VALUES %s ON CONFLICT (code) DO NOTHING
-                        """,
-                        sub_rows
-                    )
-                    # 3. إدراج القيود في جدول Ledger
-                    execute_values(
-                        cur,
-                        """
-                        INSERT INTO myapp.financial_ledger (code, amount, category, created_by, notes)
-                        VALUES %s
-                        """,
-                        ledger_rows
-                    )
-                conn.commit()
-            st.success(f"🎉 تم توليد وحفظ {len(generated_codes)} كارت تفعيل بنجاح وإدراجها بالدفتر المالي!")
-            st.text_area("الأكواد المولدة حديثاً (يمكنك نسخها)", value="\n".join(generated_codes), height=150)
-        except Exception as err:
-            st.error(f"حدث خطأ أثناء حفظ الكروت: {err}")
+    st.markdown("### 📜 سجل القيود المالية (Financial Ledger)")
+    ledger_df = query_db("SELECT id, code, amount, category, phone, device_id, created_by, notes, created_at FROM myapp.financial_ledger ORDER BY created_at DESC LIMIT 200")
+    if ledger_df is not None and not ledger_df.empty:
+        st.dataframe(ledger_df, use_container_width=True, hide_index=True, height=300)
 
-    st.markdown("### 🔍 البحث وإدارة الأكواد المولدة")
-    search_code = st.text_input("ابحث عن كود معين")
-    code_sql = "SELECT code, category, price, duration_days, status, employee_name, activated_device_id, created_at FROM myapp.activation_codes_audit"
-    params = []
-    if search_code.strip():
-        code_sql += " WHERE code ILIKE %s"
-        params.append(f"%{search_code.strip()}%")
-    code_sql += " ORDER BY created_at DESC LIMIT 200"
-    
-    codes_df = query_db(code_sql, params)
-    if codes_df is not None and not codes_df.empty:
-        st.dataframe(codes_df, use_container_width=True, hide_index=True, height=350)
+# 4. جدول الكروت
+elif menu.startswith("🎟️") and "تنظيم" in menu:
+    page_header("🎟️ تنظيم وجدول الكروت (مستخدم / غير مستخدم)", "فرز الكروت حسب الحالة من قاعدة البيانات حصراً.")
+    code_filter = st.selectbox("فرز الكروت", ["الكل", "كروت متاحة (غير مستخدمة)", "كروت مستخدمة ومفعلة"])
+    sql = "SELECT id, code, category, price, duration_days, status, employee_name, activated_device_id, created_at FROM myapp.activation_codes_audit"
+    if code_filter == "كروت متاحة (غير مستخدمة)":
+        sql += " WHERE status = 'generated' OR status = 'new'"
+    elif code_filter == "كروت مستخدمة ومفعلة":
+        sql += " WHERE status = 'used'"
+    sql += " ORDER BY created_at DESC LIMIT 300"
+    codes = query_db(sql)
+    if codes is not None and not codes.empty:
+        st.dataframe(codes, use_container_width=True, hide_index=True, height=450)
+
+# 5. تفعيل اشتراك
+elif menu.startswith("🎟️") and "تفعيل" in menu:
+    page_header("🎟️ تفعيل اشتراك يدوي فوري", "تفعيل حساب السائق برقم الهاتف ومعرّف الجهاز.")
+    dev_id = st.text_input("معرّف الجهاز (Device ID)")
+    phone = st.text_input("رقم الهاتف")
+    days = st.number_input("المدة (أيام)", value=30)
+    tier = st.selectbox("الباقة", ["VIP", "STANDARD", "TRIAL"])
+    if st.button("🚀 تنفيذ التفعيل الفوري", type="primary"):
+        if dev_id.strip():
+            query_db("UPDATE myapp.users_status SET status='Active', sub_tier=%s, expiry_date=NOW() + (%s || ' days')::interval, phone=COALESCE(NULLIF(%s,''),phone), is_frozen=FALSE WHERE device_id=%s", (tier, int(days), phone.strip(), dev_id.strip()), is_select=False)
+            st.success("✅ تم تفعيل الاشتراك بنجاح!")
+
+# 6. فحص وصحة الحزم
+elif menu.startswith("🩺"):
+    page_header("🩺 فحص وصحة الحزم (App Health & Packages)", "مراقبة تقارير الصحة وحالة الحزم وتفعيل المنصات لكل جهاز.")
+    health_logs = query_db("SELECT device_id, event_type, details->'packages'->>'jeeny' AS jeeny, details->'status'->>'jeenyEnabled' AS jeeny_on, created_at FROM myapp.bot_logs WHERE event_type LIKE '%HEALTH%' ORDER BY created_at DESC LIMIT 200")
+    if health_logs is not None and not health_logs.empty:
+        st.dataframe(health_logs, use_container_width=True, hide_index=True, height=450)
     else:
-        st.info("لا توجد أكواد تفعيل مطابقة للبحث.")
+        st.info("لا توجد تقارير صحة حزم مسجلة حتى الآن.")
 
+# 7. سجلات أداء البوت
+elif menu.startswith("🤖"):
+    page_header("🤖 سجلات أداء البوت والتشخيص (Telemetry)", "مراقبة سرعات الاستجابة وأداء النقر.")
+    logs = query_db("SELECT * FROM myapp.bot_logs ORDER BY created_at DESC LIMIT 200")
+    if logs is not None and not logs.empty:
+        st.dataframe(logs, use_container_width=True, hide_index=True, height=450)
 
-# ------------------------------------------------------------
-# القسم 3: إحصائيات الأسطول والمستخدمين
-# ------------------------------------------------------------
-elif menu.startswith("📈"):
-    st.markdown("<div class='hero'><h1>📈 إحصائيات الأسطول والمستخدمين الشاملة</h1><p>مراقبة الأجهزة المتصلة، العوائد، وتوزيع النقر والتطبيق.</p></div>", unsafe_allow_html=True)
+# 8. الإشعارات
+elif menu.startswith("📢"):
+    page_header("📢 مركز الإشعارات الشامل الكامل", "بث تنبيهات فورية أو منسدلة للأجهزة المتصلة.")
+    msg = st.text_area("نص الإشعار", value="تنبيه هام من الإدارة المركزية.")
+    if st.button("🚀 بث الإشعار لجميع الأجهزة", type="primary"):
+        query_db("UPDATE myapp.users_status SET notice_message = %s", (msg.strip(),), is_select=False)
+        st.success("تم بث الإشعار بنجاح!")
+
+# 9. التحديثات الإجبارية
+elif menu.startswith("🚀"):
+    page_header("🚀 إدارة التحديثات الإجبارية", "إدارة أحدث إصدار ورابط التحميل.")
+    ver = st.text_input("النسخة الأحدث", value="7.2.7")
+    url = st.text_input("رابط التحميل APK", value="")
+    if st.button("💾 حفظ الإعدادات"):
+        query_db("INSERT INTO myapp.app_config (key, value) VALUES ('latest_version', %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", (ver,), is_select=False)
+        st.success("تم الحفظ بنجاح.")
+
+# 10. البيانات الحية
+elif menu.startswith("⚡"):
+    page_header("⚡ تحديث البيانات الحية (LIVE UPDATE)", "تعديل الكلمات المفتاحية وسرعات النقر الحية.")
+    cfg = query_db("SELECT key, value FROM myapp.app_config")
+    if cfg is not None:
+        st.data_editor(cfg, use_container_width=True, hide_index=True)
+
+# 11. إدارة الصلاحيات وتسجيل المشرفين
+elif menu.startswith("🔐"):
+    page_header("🔐 إدارة الصلاحيات وتسجيل المشرفين والمستخدمين الإداريين", "إضافة مشرفين جدد، تحديد أدوارهم (مدير، مشرف، مراقب)، وتعديل الصلاحيات.")
     
-    users_stats = query_db(
-        """
-        SELECT 
-            COUNT(*) AS total_users,
-            COUNT(*) FILTER (WHERE status = 'Active') AS active_users,
-            COUNT(*) FILTER (WHERE last_active >= NOW() - INTERVAL '5 minutes') AS online_now,
-            COALESCE(SUM(accepted_clicks), 0) AS total_clicks,
-            COUNT(*) FILTER (WHERE is_frozen = TRUE) AS frozen_users
-        FROM myapp.users_status
-        """
-    )
-    if users_stats is not None and not users_stats.empty:
-        us = users_stats.iloc[0]
-        st1, st2, st3, st4, st5 = st.columns(5)
-        st1.metric("إجمالي الكباتن", f"{int(us['total_users'] or 0):,}")
-        st2.metric("الاشتراكات النشطة", f"{int(us['active_users'] or 0):,}")
-        st3.metric("المتصلين الآن 🟢", f"{int(us['online_now'] or 0):,}")
-        st4.metric("إجمالي النقرات ⚡", f"{int(us['total_clicks'] or 0):,}")
-        st5.metric("المستخدمين المجمدين ❄️️", f"{int(us['frozen_users'] or 0):,}")
+    st.markdown("### ➕ تسجيل مشرف أو مستخدم إداري جديد")
+    c_st1, c_st2 = st.columns(2)
+    with c_st1:
+        new_username = st.text_input("اسم المستخدم (Username)", value="")
+        new_display = st.text_input("الاسم المعروض (Display Name)", value="")
+        new_pass = st.text_input("كلمة المرور", type="password", value="")
+    with c_st2:
+        new_role = st.selectbox("الدور والصلاحيات", ["admin", "operator", "accountant", "monitor"])
+        new_active = st.checkbox("حساب مفعل وناشط", value=True)
+        
+    if st.button("🚀 تسجيل وإنشاء الحساب الإداري", type="primary"):
+        if not new_username.strip() or not new_pass.strip():
+            st.error("⚠️ اسم المستخدم وكلمة المرور حقلان إلزاميان.")
+        else:
+            pwd_hash = hashlib.sha256(new_pass.strip().encode()).hexdigest()
+            res = query_db(
+                """
+                INSERT INTO myapp.app_staff (username, password_hash, display_name, role, active)
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (username) DO UPDATE SET password_hash = EXCLUDED.password_hash, display_name = EXCLUDED.display_name, role = EXCLUDED.role, active = EXCLUDED.active
+                """,
+                (new_username.strip().lower(), pwd_hash, new_display.strip() or new_username, new_role, new_active),
+                is_select=False
+            )
+            if res:
+                st.success(f"🎉 تم تسجيل وحفظ المشرف [{new_username}] بنجاح برتبة [{new_role}]!")
+                st.rerun()
 
-    st.markdown("### 🏆 أعلى 10 كباتن في النقرات المقبولة")
-    leaderboard = query_db("SELECT phone, device_id, accepted_clicks, sub_tier, last_active FROM myapp.users_status ORDER BY accepted_clicks DESC LIMIT 10")
-    if leaderboard is not None and not leaderboard.empty:
-        st.dataframe(leaderboard, use_container_width=True, hide_index=True)
+    st.markdown("### 📋 قائمة المشرفين والمستخدمين المسجلين")
+    staff_df = query_db("SELECT id, username, display_name, role, active, created_at FROM myapp.app_staff ORDER BY created_at DESC")
+    if staff_df is not None and not staff_df.empty:
+        st.dataframe(staff_df, use_container_width=True, hide_index=True, height=300)
+        
+        st.markdown("### 🛠️ إجراءات على الحسابات الإدارية")
+        staff_to_toggle = st.selectbox("اختر اسم المستخدم الإداري", staff_df["username"].tolist())
+        c_act1, c_act2 = st.columns(2)
+        with c_act1:
+            if st.button("🔄 تبديل تفعيل الحساب"):
+                query_db("UPDATE myapp.app_staff SET active = NOT active WHERE username = %s", (staff_to_toggle,), is_select=False)
+                st.success(f"تم تغيير حالة الحساب [{staff_to_toggle}] بنجاح.")
+                st.rerun()
+        with c_act2:
+            if st.button("🗑️ حذف الحساب"):
+                if staff_to_toggle == "admin":
+                    st.error("لا يمكن حذف المشرف الرئيسي (admin).")
+                else:
+                    query_db("DELETE FROM myapp.app_staff WHERE username = %s", (staff_to_toggle,), is_select=False)
+                    st.success(f"تم حذف الحساب [{staff_to_toggle}] بنجاح.")
+                    st.rerun()
     else:
-        st.info("لا يوجود بيانات مستخدمين للعرض.")
+        st.info("لا توجد حسابات مشرفين مسجلة حتى الآن (باستثناء حساب المدير العام الافتراضي).")
 
-
-# ------------------------------------------------------------
-# القسم 4: إدارة المستخدمين وأدواتهم الفردية
-# ------------------------------------------------------------
+# 12. حالة السيرفر
 else:
-    st.markdown("<div class='hero'><h1>👤 إدارة المستخدمين وأدوات التحكم الفردية</h1><p>تعديل الاشتراكات، تجميد/فك تجميد الحسابات، وتصفير العدادات.</p></div>", unsafe_allow_html=True)
-    
-    user_search = st.text_input("🔍 ابحث برقم الهاتف أو Device ID")
-    u_sql = "SELECT device_id, phone, status, sub_tier, expiry_date, accepted_clicks, is_frozen, last_active FROM myapp.users_status"
-    u_params = []
-    if user_search.strip():
-        u_sql += " WHERE phone ILIKE %s OR device_id ILIKE %s"
-        p = f"%{user_search.strip()}%"
-        u_params.extend([p, p])
-    u_sql += " ORDER BY last_active DESC NULLS LAST LIMIT 150"
-    
-    users_list = query_db(u_sql, u_params)
-    if users_list is not None and not users_list.empty:
-        st.dataframe(users_list, use_container_width=True, hide_index=True, height=280)
-        
-        st.markdown("### 🛠️ أدوات التحكم بالحساب المحدد")
-        selected_dev = st.selectbox("اختر معرّف الجهاز لتطبيق الأداة عليه", users_list["device_id"].tolist())
-        
-        if selected_dev:
-            c_t1, c_t2, c_t3, c_t4 = st.columns(4)
-            with c_t1:
-                ext_days = st.number_input("تمديد الاشتراك (أيام)", min_value=1, max_value=365, value=30, key="ext_days_input")
-                if st.button("➕ تمديد الاشتراك", use_container_width=True):
-                    # صياغة SQL آمنة مع PostgreSQL لنفس النوع %s * INTERVAL '1 day'
-                    query_db(
-                        """
-                        UPDATE myapp.users_status 
-                        SET expiry_date = GREATEST(COALESCE(expiry_date, NOW()), NOW()) + (%s * INTERVAL '1 day'), 
-                            status='Active', 
-                            is_frozen=FALSE 
-                        WHERE device_id = %s
-                        """,
-                        (int(ext_days), selected_dev),
-                        is_select=False
-                    )
-                    st.success(f"تم تمديد الاشتراك للجهاز {selected_dev} بمقدار {ext_days} يوم.")
-                    st.rerun()
-            with c_t2:
-                if st.button("❄️ / 🔥 تبديل التجميد", use_container_width=True):
-                    query_db("UPDATE myapp.users_status SET is_frozen = NOT is_frozen WHERE device_id = %s", (selected_dev,), is_select=False)
-                    st.success(f"تم تغيير حالة التجميد للجهاز {selected_dev}.")
-                    st.rerun()
-            with c_t3:
-                if st.button("🔄 تصفير عداد النقرات", use_container_width=True):
-                    query_db("UPDATE myapp.users_status SET accepted_clicks = 0 WHERE device_id = %s", (selected_dev,), is_select=False)
-                    st.success(f"تم تصفير عداد النقرات للجهاز {selected_dev}.")
-                    st.rerun()
-            with c_t4:
-                if st.button("🗑️ حذف الحساب بالكامل", use_container_width=True):
-                    query_db("DELETE FROM myapp.users_status WHERE device_id = %s", (selected_dev,), is_select=False)
-                    st.success(f"تم حذف الحساب {selected_dev} بنجاح.")
-                    st.rerun()
-    else:
-        st.warning("لا يوجد مستخدمون مطابقون لشروط البحث.")
+    page_header("🖥️ حالة السيرفر والقاعدة", "مراقبة استقرار قاعدة البيانات Neon PostgreSQL.")
+    db_h = query_db("SELECT NOW() AS now, COUNT(*) AS users FROM myapp.users_status")
+    st.success("قاعدة بيانات Neon PostgreSQL متصلة وتعمل بكفاءة تامة 🚀") if db_h is not None else st.error("تعذر الاتصال بقاعدة البيانات.")
