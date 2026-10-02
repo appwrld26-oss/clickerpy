@@ -126,11 +126,16 @@ def query_db(sql: str, params: Optional[Iterable[Any]] = None, is_select: bool =
     try:
         with db_session() as conn:
             with conn.cursor() as cur:
-                cur.execute(sql, tuple(params or ()))
+                if params is not None:
+                    cur.execute(sql, tuple(params))
+                else:
+                    cur.execute(sql)
                 if is_select:
                     rows = cur.fetchall()
-                    cols = [desc[0] for desc in cur.description]
-                    return pd.DataFrame(rows, columns=cols)
+                    if cur.description:
+                        cols = [desc[0] for desc in cur.description]
+                        return pd.DataFrame(rows, columns=cols)
+                    return pd.DataFrame()
                 conn.commit()
                 return True
     except Exception as e:
@@ -260,7 +265,7 @@ if menu.startswith("📈"):
                COUNT(*) FILTER (WHERE last_active >= NOW() - INTERVAL '5 minutes') AS online,
                COUNT(*) FILTER (WHERE last_active IS NULL OR last_active < NOW() - INTERVAL '5 minutes') AS offline
         FROM myapp.users_status
-        WHERE device_id NOT LIKE 'sim_%'
+        WHERE device_id NOT LIKE 'sim_%%'
         """
     )
     if summary is not None and not summary.empty:
@@ -277,7 +282,7 @@ elif menu.startswith("👥"):
     page_header("👥 إدارة أسطول الكباتن", "جدول شامل لمراقبة المستخدمين، تجميد الأجهزة، وتعديل الاشتراكات بضغطة زر.")
     search = st.text_input("🔍 ابحث برقم الهاتف أو معرّف الجهاز (Device ID)")
     
-    u_sql = "SELECT device_id, phone, status, sub_tier, expiry_date, accepted_clicks, is_frozen, last_active FROM myapp.users_status WHERE device_id NOT LIKE 'sim_%'"
+    u_sql = "SELECT device_id, phone, status, sub_tier, expiry_date, accepted_clicks, is_frozen, last_active FROM myapp.users_status WHERE device_id NOT LIKE 'sim_%%'"
     u_params = []
     if search.strip():
         u_sql += " AND (phone ILIKE %s OR device_id ILIKE %s)"
@@ -285,7 +290,7 @@ elif menu.startswith("👥"):
         u_params.extend([p, p])
     u_sql += " ORDER BY last_active DESC NULLS LAST LIMIT 200"
     
-    users = query_db(u_sql, u_params)
+    users = query_db(u_sql, u_params if u_params else None)
     if users is not None and not users.empty:
         st.dataframe(users, use_container_width=True, hide_index=True, height=400)
     else:
@@ -381,7 +386,7 @@ elif menu.startswith("🎟️") and "تفعيل" in menu:
 # 6. فحص وصحة الحزم
 elif menu.startswith("🩺"):
     page_header("🩺 فحص وصحة الحزم (App Health & Packages)", "مراقبة تقارير الصحة وحالة الحزم وتفعيل المنصات لكل جهاز.")
-    health_logs = query_db("SELECT device_id, event_type, details->'packages'->>'jeeny' AS jeeny, details->'status'->>'jeenyEnabled' AS jeeny_on, created_at FROM myapp.bot_logs WHERE event_type LIKE '%HEALTH%' ORDER BY created_at DESC LIMIT 200")
+    health_logs = query_db("SELECT device_id, event_type, details->'packages'->>'jeeny' AS jeeny, details->'status'->>'jeenyEnabled' AS jeeny_on, created_at FROM myapp.bot_logs WHERE event_type LIKE '%%HEALTH%%' ORDER BY created_at DESC LIMIT 200")
     if health_logs is not None and not health_logs.empty:
         st.dataframe(health_logs, use_container_width=True, hide_index=True, height=450)
     else:
