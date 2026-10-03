@@ -9,10 +9,6 @@
 3. دعم التفعيل الفوري (UPSERT) والتوافق الكامل مع تطبيق الأندرويد والمحاكيات.
 4. لوحة مراقبة الأسطول، سرعات النقر (Click Delay ms)، وسجلات التيليميتري.
 ===================================================================================
-طريقة التشغيل في الطرفية:
-    pip install streamlit psycopg2-binary pandas plotly numpy
-    streamlit run dashboard.py
-===================================================================================
 """
 
 import hashlib
@@ -161,9 +157,9 @@ def db_connection():
 
 
 def run_query(
-    query: str,
-    params: Optional[Iterable[Any]] = None,
-    is_select: bool = True,
+        query: str,
+        params: Optional[Iterable[Any]] = None,
+        is_select: bool = True,
 ) -> Optional[Union[pd.DataFrame, bool]]:
     """تنفيذ الاستعلامات بأمان مع معالجة الأخطاء والتراجع التلقائي"""
     try:
@@ -309,7 +305,7 @@ menu = st.sidebar.radio(
 # ============================================================
 if menu.startswith("📊"):
     st.header("📊 حالة الأسطول والأجهزة المتصلة")
-    
+
     users_df = run_query(
         """
         SELECT 
@@ -323,7 +319,7 @@ if menu.startswith("📊"):
         ORDER BY u.last_active DESC
         """
     )
-    
+
     if users_df is not None and not users_df.empty:
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("إجمالي الأجهزة", len(users_df))
@@ -366,7 +362,7 @@ elif menu.startswith("📢"):
         st.subheader("بث إشعار منسدل شامل لكافة الأجهزة")
         b_title = st.text_input("عنوان الإشعار الجماعي", value="تنبيه عام من الإدارة المركزية", key="b_title")
         b_msg = st.text_area("نص الإشعار المنسدل", value="تنبيه تشغيلي فوري: يرجى التأكد من استقرار الإنترنت وتفعيل خدمة إمكانية الوصول.", key="b_msg")
-        
+
         col_bs1, col_bs2 = st.columns(2)
         with col_bs1:
             b_priority = st.selectbox("الأولوية", ["عالي وفوري (Urgent)", "عادي (Normal)", "تحذير تشغيلي (Warning)"])
@@ -379,7 +375,7 @@ elif menu.startswith("📢"):
                 if b_msg.strip():
                     clean_msg = b_msg.strip()
                     notif_ver = str(int(time.time() * 1000))
-                    
+
                     # 1. حفظ في إعدادات التطبيق وتحديث نسخة الإشعار
                     save_config({
                         "notice_message": clean_msg,
@@ -390,10 +386,10 @@ elif menu.startswith("📢"):
                         "notification_priority": b_priority,
                         "notification_enabled": "true",
                     })
-                    
+
                     # 2. تحديث جدول المستخدمين النشطين
                     run_query("UPDATE myapp.users_status SET notice_message = %s, last_active = NOW()", (clean_msg,), is_select=False)
-                    
+
                     # 3. تسجيل في جدول الإشعارات
                     run_query(
                         """
@@ -403,7 +399,7 @@ elif menu.startswith("📢"):
                         (b_title.strip(), clean_msg, b_priority, b_sound),
                         is_select=False,
                     )
-                    
+
                     # 4. تحديث سجل تسليم الإشعارات لكافة الأجهزة
                     run_query(
                         """
@@ -490,6 +486,11 @@ elif menu.startswith("📢"):
                 dev_id = target_dev.strip()
                 phone_val = ind_phone.strip()
 
+                if not dev_id and phone_val:
+                    matched = run_query("SELECT device_id FROM myapp.users_status WHERE phone ILIKE %s LIMIT 1", (f"%{phone_val}%",))
+                    if matched is not None and not matched.empty:
+                        dev_id = str(matched.iloc[0]["device_id"])
+
                 if dev_id:
                     run_query(
                         "UPDATE myapp.users_status SET notice_message = %s, last_active = NOW() WHERE device_id = %s",
@@ -510,28 +511,6 @@ elif menu.startswith("📢"):
                         (dev_id, phone_val or None, notif_ver, notif_ver),
                         is_select=False
                     )
-                elif phone_val:
-                    matched = run_query("SELECT device_id FROM myapp.users_status WHERE phone ILIKE %s LIMIT 1", (f"%{phone_val}%",))
-                    if matched is not None and not matched.empty:
-                        dev_id = str(matched.iloc[0]["device_id"])
-                        run_query(
-                            "UPDATE myapp.users_status SET notice_message = %s, last_active = NOW() WHERE device_id = %s",
-                            (clean_msg, dev_id),
-                            is_select=False
-                        )
-                        run_query(
-                            """
-                            INSERT INTO myapp.notification_delivery (device_id, phone, notification_version, notification_id, delivery_status, last_sync_at)
-                            VALUES (%s, %s, %s, %s, 'مرسل للكابتن 🟢 (Heads-Up)', NOW())
-                            ON CONFLICT (device_id) DO UPDATE SET
-                                notification_version = EXCLUDED.notification_version,
-                                notification_id = EXCLUDED.notification_id,
-                                delivery_status = 'مرسل للكابتن 🟢 (Heads-Up)',
-                                last_sync_at = NOW()
-                            """,
-                            (dev_id, phone_val, notif_ver, notif_ver),
-                            is_select=False
-                        )
 
                 run_query(
                     """
@@ -539,7 +518,7 @@ elif menu.startswith("📢"):
                     (title, message, type, target_phone, target_device_id, priority, sender, created_at)
                     VALUES (%s, %s, 'individual', %s, %s, 'urgent', 'الإدارة المركزية', NOW())
                     """,
-                    (ind_title.strip(), clean_msg, phone_val, dev_id),
+                    (ind_title.strip(), clean_msg, phone_val, dev_id or None),
                     is_select=False
                 )
                 st.success(f"✅ تم إرسال الإشعار الفردي المنسدل فوراً لجهاز الكابتن ({dev_id or phone_val}) بإصدار ({notif_ver})!")
@@ -565,7 +544,7 @@ elif menu.startswith("📢"):
 # ============================================================
 elif menu.startswith("📱🎮"):
     st.header("📱🎮 بوابة ربط المحاكي بالهاتف (Emulator Bridge)")
-    
+
     col_e1, col_e2 = st.columns(2)
     with col_e1:
         st.subheader("ربط محاكي جديد برقم الهاتف فورياً")
@@ -623,7 +602,7 @@ elif menu.startswith("📱🎮"):
 # ============================================================
 elif menu.startswith("🎟️"):
     st.header("🎟️ تفعيل اشتراك يدوي فوري (UPSERT Fix)")
-    
+
     col_m1, col_m2 = st.columns(2)
     with col_m1:
         manual_phone = st.text_input("📱 رقم هاتف الكابتن")
@@ -644,21 +623,22 @@ elif menu.startswith("🎟️"):
         if not target_device_id.strip():
             st.error("⚠️ يرجى إدخال معرّف الجهاز.")
         else:
+            days_int = int(activation_days)
             res = run_query(
                 """
                 INSERT INTO myapp.users_status 
                 (device_id, phone, status, sub_tier, expiry_date, activated_code, is_frozen, last_active)
-                VALUES (%s, %s, 'Active', %s, NOW() + (%s || ' days')::interval, %s, FALSE, NOW())
+                VALUES (%s, %s, 'Active', %s, NOW() + (%s * INTERVAL '1 day'), %s, FALSE, NOW())
                 ON CONFLICT (device_id) DO UPDATE SET
                     status = 'Active',
                     sub_tier = EXCLUDED.sub_tier,
-                    expiry_date = GREATEST(COALESCE(myapp.users_status.expiry_date, NOW()), NOW()) + (%s || ' days')::interval,
+                    expiry_date = GREATEST(COALESCE(myapp.users_status.expiry_date, NOW()), NOW()) + (%s * INTERVAL '1 day'),
                     phone = COALESCE(NULLIF(EXCLUDED.phone, ''), myapp.users_status.phone),
                     activated_code = EXCLUDED.activated_code,
                     is_frozen = FALSE,
                     last_active = NOW()
                 """,
-                (target_device_id.strip(), manual_phone.strip(), tier_choice, int(activation_days), activation_code.strip(), int(activation_days)),
+                (target_device_id.strip(), manual_phone.strip(), tier_choice, days_int, activation_code.strip(), days_int),
                 is_select=False
             )
             if res:
@@ -671,7 +651,7 @@ elif menu.startswith("🎟️"):
 # ============================================================
 elif menu.startswith("🤖"):
     st.header("🤖 سجلات أداء البوت والتشخيص اللحظي (Telemetry)")
-    
+
     logs = run_query("SELECT * FROM myapp.bot_logs ORDER BY created_at DESC LIMIT 200")
     if logs is not None and not logs.empty:
         valid_reactions = logs["reaction_time_ms"].dropna()
