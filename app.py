@@ -1,509 +1,492 @@
-#!/usr/bin/env python3
-"""
-===================================================================================
-🚗 EMPEROR BOT CONTROL SYSTEM - BACKEND API & CONTROLLER (PYTHON / FASTAPI)
-===================================================================================
-خادم بايثون متكامل وسريع (FastAPI + AsyncPG + Pydantic + Uvicorn)
-متوافق بنسبة 100% مع قاعدة بيانات Neon PostgreSQL ومع كافة وظائف السيرفر:
-1. استقبال القياس عن بعد والبث اللحظي (Telemetry & Bot Logs)
-2. إدارة حالة المستخدمين والأجهزة (Users Status, Devices, Freeze, Expiry)
-3. رموز التفعيل والاشتراكات (Activation Codes, Audits, Subscriptions)
-4. إعدادات السرعة وسرعات الهواتف (Global, Tier-based & Individual Click Delays)
-5. فحص الترخيص والتشغيل لتطبيقات الهواتف (License Verification & Check App)
-6. إدارة الموظفين والصلاحيات (Staff Authentication & Sessions)
-7. فحص الجاهزية ولوحة القياس الإحصائية (Health Check & Real-time Metrics)
-===================================================================================
-طريقة التشغيل:
-pip install fastapi uvicorn asyncpg psycopg2-binary python-dotenv pydantic requests
-python server.py
-"""
-
-import os
-import sys
-import json
 import hashlib
-import asyncio
-from datetime import datetime, timezone, timedelta
-from typing import Optional, List, Dict, Any
+import json
+import os
+import time
+from contextlib import contextmanager
+from datetime import datetime, timezone
+from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
-from fastapi import FastAPI, Request, Response, HTTPException, Depends, Header, Query
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, PlainTextResponse
-from pydantic import BaseModel, Field
-import asyncpg
+import numpy as np
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+import psycopg2
+from psycopg2 import pool, extras
+import streamlit as st
 
-# ===================================================================================
-# 1. إعدادات البيئة وقاعدة البيانات
-# ===================================================================================
-DB_URL = os.getenv(
-    "DATABASE_URL",
+
+# ============================================================
+# 1. إعداد الصفحة والتنسيق البصري (RTL & Modern Arabic UI)
+# ============================================================
+st.set_page_config(
+    page_title="MyClicker Pro | لوحة التحكم المركزية",
+    page_icon="⚡",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+st.markdown(
+    """
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&display=swap');
+
+    :root {
+        --primary: #159fbe;
+        --primary-dark: #0f7a93;
+        --bg-main: #f4f8fb;
+        --card-bg: #ffffff;
+        --text-main: #24445b;
+        --text-sub: #587184;
+        --border-color: #d7e5ec;
+        --success: #10b981;
+        --warning: #f59e0b;
+        --danger: #ef4444;
+    }
+
+    * {
+        font-family: 'Cairo', sans-serif !important;
+    }
+
+    .stApp {
+        background-color: var(--bg-main);
+        direction: rtl;
+        text-align: right;
+    }
+
+    .main .block-container {
+        padding-top: 1.5rem;
+        padding-bottom: 3rem;
+        max-width: 1400px;
+    }
+
+    /* كروت المقاييس العلوية */
+    div[data-testid="stMetric"] {
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 18px;
+        padding: 18px 22px;
+        box-shadow: 0 4px 15px rgba(21, 159, 190, 0.05);
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    div[data-testid="stMetric"]:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 22px rgba(21, 159, 190, 0.12);
+        border-color: var(--primary);
+    }
+    div[data-testid="stMetricLabel"] {
+        font-size: 0.95rem !important;
+        font-weight: 700 !important;
+        color: var(--text-sub) !important;
+    }
+    div[data-testid="stMetricValue"] {
+        font-size: 1.8rem !important;
+        font-weight: 900 !important;
+        color: var(--text-main) !important;
+    }
+
+    /* الأزرار العصرية */
+    div.stButton > button {
+        border-radius: 14px !important;
+        font-weight: 800 !important;
+        padding: 0.55rem 1.4rem !important;
+        transition: all 0.2s ease !important;
+        border: none !important;
+    }
+    div.stButton > button[kind="primary"] {
+        background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%) !important;
+        color: white !important;
+        box-shadow: 0 4px 14px rgba(21, 159, 190, 0.35) !important;
+    }
+    div.stButton > button[kind="primary"]:hover {
+        box-shadow: 0 6px 20px rgba(21, 159, 190, 0.5) !important;
+        transform: translateY(-1px);
+    }
+
+    /* الحقول والمدخلات */
+    div[data-baseweb="input"], div[data-baseweb="select"] {
+        border-radius: 12px !important;
+    }
+
+    /* الجداول */
+    .stDataFrame {
+        border-radius: 16px;
+        overflow: hidden;
+        border: 1px solid var(--border-color);
+        box-shadow: 0 4px 16px rgba(0,0,0,0.02);
+    }
+
+    /* تنبيهات الحالة */
+    .stAlert {
+        border-radius: 14px !important;
+        font-weight: 700 !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+
+# ============================================================
+# 2. إدارة قاعدة البيانات والاتصال الآمن بـ Neon PostgreSQL
+# ============================================================
+DEFAULT_NEON_URL = (
     "postgresql://neondb_owner:npg_AvzFkHQ6M3yo@ep-tiny-wind-ayd9hww0-pooler.c-5.us-east-2.aws.neon.tech/neondb?sslmode=require"
 )
-ENV_ADMIN_KEY = os.getenv("ADMIN_KEY", "admin123")
-ENV_APP_SECRET_KEY = os.getenv("APP_SECRET_KEY", "MySuperSecretKey123!@#")
-API_SECRET_TOKEN = os.getenv("API_SECRET_TOKEN", "EMPEROR_BOT_SECURE_TOKEN_2026")
-PORT = int(os.getenv("PORT", "3000"))
 
-# تطبيق FastAPI
-app = FastAPI(
-    title="Emperor Bot Management & Telemetry API",
-    description="سيرفر بايثون متكامل للتحكم ببوتات النقرات ومتابعة تيليميتري الهواتف الحية",
-    version="2.0.0"
-)
+DATABASE_URL = os.getenv("DATABASE_URL", DEFAULT_NEON_URL)
+# تنظيف معامل channel_binding لضمان التوافق التام مع psycopg2
+CLEAN_DATABASE_URL = DATABASE_URL.replace("&channel_binding=require", "")
 
-# تفعيل CORS للاتصال من جميع المتصفحات والهواتف
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
-# مجمع اتصالات قاعدة البيانات (Connection Pool)
-db_pool: Optional[asyncpg.Pool] = None
-
-@app.on_event("startup")
-async def startup_event():
-    global db_pool
-    print("⏳ جارٍ الاتصال بقاعدة بيانات Neon PostgreSQL عبر بايثون...")
+@st.cache_resource(show_spinner=False)
+def get_connection_pool():
+    """تهيئة تجمع اتصالات Neon آمن وقابل للاسترجاع التلقائي."""
     try:
-        # تحويل رابط الاتصال ليناسب asyncpg
-        clean_url = DB_URL.replace("sslmode=require", "ssl=require")
-        db_pool = await asyncpg.create_pool(
-            dsn=clean_url,
-            min_size=2,
-            max_size=15,
-            timeout=30,
-            command_timeout=60
+        connection_pool = pool.ThreadedConnectionPool(
+            minconn=1,
+            maxconn=15,
+            dsn=CLEAN_DATABASE_URL,
+            connect_timeout=10,
+            application_name="MyClickerStreamlitDashboard",
         )
-        print("✅ تم الاتصال بنجاح بقاعدة البيانات.")
-        await init_tables()
+        return connection_pool
     except Exception as e:
-        print(f"❌ خطأ أثناء الاتصال بقاعدة البيانات: {e}", file=sys.stderr)
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    global db_pool
-    if db_pool:
-        await db_pool.close()
-        print("🔌 تم إغلاق مجمع اتصالات قاعدة البيانات.")
+        st.error(f"❌ خطأ أثناء إنشاء تجمع الاتصال بقاعدة البيانات: {e}")
+        return None
 
 
-# ===================================================================================
-# 2. إنشاء الجداول والإعدادات الافتراضية
-# ===================================================================================
-async def init_tables():
-    if not db_pool:
-        return
-    async with db_pool.acquire() as conn:
-        await conn.execute("CREATE SCHEMA IF NOT EXISTS myapp;")
-        
-        # جدول الإعدادات
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS myapp.app_config (
-                key TEXT PRIMARY KEY,
-                value TEXT
-            );
-        """)
-        
-        # جدول المستخدمين والأجهزة
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS myapp.users_status (
-                device_id TEXT PRIMARY KEY,
-                phone TEXT,
-                status TEXT DEFAULT 'Active',
-                sub_tier TEXT DEFAULT 'STANDARD',
-                accepted_clicks BIGINT DEFAULT 0,
-                app_version TEXT,
-                device_model TEXT,
-                device_tier TEXT DEFAULT 'midrange',
-                custom_click_delay INTEGER DEFAULT NULL,
-                is_frozen BOOLEAN DEFAULT FALSE,
-                notice_message TEXT,
-                expiry_date TIMESTAMPTZ,
-                last_active TIMESTAMPTZ DEFAULT NOW()
-            );
-        """)
-
-        # جدول سجلات البوت والتيليميتري
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS myapp.bot_logs (
-                id BIGSERIAL PRIMARY KEY,
-                device_id TEXT NOT NULL,
-                event_type TEXT NOT NULL,
-                status TEXT NOT NULL,
-                order_price NUMERIC(10,2),
-                order_distance NUMERIC(10,2),
-                keyword TEXT,
-                reaction_time_ms INTEGER,
-                detected_app TEXT,
-                ignore_reason TEXT,
-                conditions_ignored BOOLEAN DEFAULT FALSE,
-                details JSONB,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            );
-        """)
-
-        # جدول الموظفين
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS myapp.app_staff (
-                id BIGSERIAL PRIMARY KEY,
-                username TEXT UNIQUE NOT NULL,
-                password_hash TEXT NOT NULL,
-                display_name TEXT NOT NULL,
-                role TEXT NOT NULL DEFAULT 'monitor',
-                permissions TEXT,
-                active BOOLEAN NOT NULL DEFAULT TRUE,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            );
-        """)
-
-        # جدول الاشتراكات والأكواد
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS myapp.subscriptions (
-                code TEXT PRIMARY KEY,
-                duration_days INTEGER NOT NULL DEFAULT 30,
-                category TEXT NOT NULL DEFAULT 'STANDARD',
-                payment_status TEXT NOT NULL DEFAULT 'pending',
-                renewal_status TEXT NOT NULL DEFAULT 'new',
-                renewed_at TIMESTAMPTZ,
-                is_used BOOLEAN NOT NULL DEFAULT FALSE,
-                used_by_device TEXT,
-                used_at TIMESTAMPTZ
-            );
-        """)
-
-        # الإعدادات الافتراضية
-        default_configs = {
-            "app_name": "Emperor Bot Suite 2026",
-            "bot_enabled": "true",
-            "click_delay": "35",
-            "tier_flagship_delay": "10",
-            "tier_midrange_delay": "35",
-            "tier_budget_delay": "80",
-            "min_reaction_time_ms": "12",
-            "global_notice": "",
-            "active_version": "7.3.0"
-        }
-        for k, v in default_configs.items():
-            await conn.execute("""
-                INSERT INTO myapp.app_config (key, value)
-                VALUES ($1, $2)
-                ON CONFLICT (key) DO NOTHING;
-            """, k, v)
-        print("🚀 تم تهيئة جداول النظام وإعدادات الإنتاج بنجاح.")
-
-
-# ===================================================================================
-# 3. دوال مساعدة لحساب سرعة النقرات والتحقق
-# ===================================================================================
-def calculate_effective_delay(user: Optional[dict], configs: dict) -> dict:
-    if user and user.get("custom_click_delay") and int(user["custom_click_delay"]) > 0:
-        return {
-            "delay": int(user["custom_click_delay"]),
-            "source": "custom_individual",
-            "source_label": "فردي مخصص للجهاز 🎯",
-            "tier": user.get("device_tier") or "custom"
-        }
-    
-    tier = (user.get("device_tier") if user else "midrange") or "midrange"
-    tier = tier.lower()
-
-    if tier == "flagship":
-        return {
-            "delay": int(configs.get("tier_flagship_delay", 10)),
-            "source": "phone_tier_flagship",
-            "source_label": "فئة الهواتف الرائدة 🚀",
-            "tier": "flagship"
-        }
-    elif tier == "budget":
-        return {
-            "delay": int(configs.get("tier_budget_delay", 80)),
-            "source": "phone_tier_budget",
-            "source_label": "فئة الهواتف الاقتصادية 🛡️",
-            "tier": "budget"
-        }
-    else:
-        return {
-            "delay": int(configs.get("tier_midrange_delay") or configs.get("click_delay", 35)),
-            "source": "phone_tier_midrange",
-            "source_label": "فئة الهواتف المتوسطة ⚖️",
-            "tier": "midrange"
-        }
-
-
-# ===================================================================================
-# 4. مسارات التيليميتري ومراقبة أداء الهواتف (TELEMETRY & BOT DIAGNOSTICS)
-# ===================================================================================
-class TelemetryPayload(BaseModel):
-    deviceId: Optional[str] = None
-    device_id: Optional[str] = None
-    eventType: Optional[str] = None
-    event_type: Optional[str] = None
-    status: Optional[str] = "SUCCESS"
-    reactionTimeMs: Optional[int] = None
-    reaction_time_ms: Optional[int] = None
-    orderPrice: Optional[float] = None
-    order_price: Optional[float] = None
-    orderDistance: Optional[float] = None
-    order_distance: Optional[float] = None
-    keyword: Optional[str] = None
-    detectedApp: Optional[str] = None
-    detected_app: Optional[str] = None
-    ignoreReason: Optional[str] = None
-    ignore_reason: Optional[str] = None
-    conditionsIgnored: Optional[bool] = False
-    details: Optional[Dict[str, Any]] = None
-
-@app.post("/api/telemetry/stream")
-@app.post("/telemetry/stream")
-async def receive_telemetry(payload: TelemetryPayload, authorization: Optional[str] = Header(None)):
-    """استقبال تدفق الأحداث الحية ونقرات الهاتف وتحديث نشاط الجهاز فورياً"""
-    target_id = (payload.deviceId or payload.device_id or "unknown_device").strip()
-    ev_type = payload.eventType or payload.event_type or "PING"
-    status = (payload.status or "SUCCESS").upper()
-    r_time = payload.reactionTimeMs if payload.reactionTimeMs is not None else payload.reaction_time_ms
-    price = payload.orderPrice if payload.orderPrice is not None else payload.order_price
-    dist = payload.orderDistance if payload.orderDistance is not None else payload.order_distance
-    kw = payload.keyword
-    app_name = payload.detectedApp or payload.detected_app
-    reason = payload.ignoreReason or payload.ignore_reason
-    ignored = bool(payload.conditionsIgnored)
-    details_json = json.dumps(payload.details or {})
-
-    async with db_pool.acquire() as conn:
-        # تسجيل الحدث
-        await conn.execute("""
-            INSERT INTO myapp.bot_logs 
-            (device_id, event_type, status, order_price, order_distance, keyword, reaction_time_ms, detected_app, ignore_reason, conditions_ignored, details, created_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, NOW())
-        """, target_id, ev_type, status, price, dist, kw, r_time, app_name, reason, ignored, details_json)
-
-        # تحديث جهاز الهاتف في users_status ليظهر فوراً في القائمة المنسدلة
-        clicks_increment = 1 if (r_time is not None and status == "SUCCESS") else 0
-        await conn.execute("""
-            INSERT INTO myapp.users_status (device_id, status, last_active, accepted_clicks)
-            VALUES ($1, 'Active', NOW(), $2)
-            ON CONFLICT (device_id) DO UPDATE
-            SET last_active = NOW(),
-                status = 'Active',
-                accepted_clicks = CASE WHEN $3 = 'SUCCESS' THEN COALESCE(myapp.users_status.accepted_clicks, 0) + $2 ELSE myapp.users_status.accepted_clicks END
-        """, target_id, clicks_increment, status)
-
-    return {"success": True, "message": "Telemetry received and recorded", "deviceId": target_id}
-
-
-@app.get("/api/admin/bot-logs")
-async def get_bot_logs(
-    limit: int = Query(50, ge=1, le=500),
-    deviceId: Optional[str] = Query(None),
-    status: Optional[str] = Query(None)
-):
-    """جلب سجلات البوت وأجهزة الهواتف المتاحة وإحصائيات الأداء في لوحة الفحص"""
-    async with db_pool.acquire() as conn:
-        # 1. الاستعلام عن السجلات
-        params = []
-        conditions = []
-        if deviceId and deviceId != "all":
-            params.append(deviceId)
-            conditions.append(f"device_id = ${len(params)}")
-        if status and status != "ALL":
-            params.append(status)
-            conditions.append(f"status = ${len(params)}")
-
-        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-        params.append(limit)
-        query = f"""
-            SELECT id, device_id, event_type, status, order_price, order_distance, 
-                   keyword, reaction_time_ms, detected_app, ignore_reason, 
-                   conditions_ignored, details, created_at
-            FROM myapp.bot_logs
-            {where_clause}
-            ORDER BY created_at DESC
-            LIMIT ${len(params)}
-        """
-        rows = await conn.fetch(query, *params)
-        logs_list = [dict(r) for r in rows]
-
-        # 2. الإحصائيات العامة
-        stat_params = [deviceId] if (deviceId and deviceId != "all") else []
-        stat_filter = "WHERE device_id = $1" if stat_params else ""
-        stats_row = await conn.fetchrow(f"""
-            SELECT 
-                COUNT(*) as total_events,
-                COUNT(*) FILTER (WHERE status = 'SUCCESS') as successful_clicks,
-                COUNT(*) FILTER (WHERE status = 'REJECTED' OR status = 'IGNORED') as filtered_out,
-                COUNT(*) FILTER (WHERE status = 'ERROR') as system_errors,
-                ROUND(AVG(reaction_time_ms) FILTER (WHERE reaction_time_ms IS NOT NULL)) as avg_reaction_time_ms,
-                MIN(reaction_time_ms) FILTER (WHERE reaction_time_ms IS NOT NULL) as min_reaction_time_ms,
-                MAX(reaction_time_ms) FILTER (WHERE reaction_time_ms IS NOT NULL) as max_reaction_time_ms
-            FROM myapp.bot_logs
-            {stat_filter}
-        """, *stat_params)
-
-        # 3. قائمة الأجهزة المتصلة مرتبة بالأحدث نشاطاً
-        devices_rows = await conn.fetch("""
-            WITH combined AS (
-                SELECT DISTINCT ON (d.device_id) 
-                    d.device_id, 
-                    COALESCE(u.phone, 'جهاز هاتف مباشر') as phone, 
-                    COALESCE(u.status, 'Online') as status, 
-                    COALESCE(d.last_event, u.last_active, NOW()) as last_active, 
-                    COALESCE(u.device_model, 'Android Device') as device_model
-                FROM (
-                    SELECT device_id, MAX(created_at) as last_event FROM myapp.bot_logs GROUP BY device_id
-                    UNION
-                    SELECT device_id, last_active as last_event FROM myapp.users_status WHERE device_id NOT LIKE 'sim_%'
-                ) d
-                LEFT JOIN myapp.users_status u ON u.device_id = d.device_id
-                WHERE d.device_id IS NOT NULL AND d.device_id != ''
-                ORDER BY d.device_id, d.last_event DESC NULLS LAST
-            )
-            SELECT * FROM combined
-            ORDER BY last_active DESC NULLS LAST
-            LIMIT 60
-        """)
-        devices_list = [dict(d) for d in devices_rows]
-
-    return {
-        "success": True,
-        "logs": logs_list,
-        "stats": dict(stats_row) if stats_row else {},
-        "devices": devices_list
-    }
-
-
-# ===================================================================================
-# 5. مسارات الهواتف وتطبيق الكابتن (LICENSE CHECK & USER APP ROUTE)
-# ===================================================================================
-@app.get("/api/user/status")
-@app.get("/user/status")
-async def check_user_status(device_id: str = Query(...)):
-    """استعلام تطبيق الهاتف عن حالة الاشتراك، سرعة النقر، والتجميد ورسالة التنبيه"""
-    async with db_pool.acquire() as conn:
-        user_row = await conn.fetchrow("""
-            SELECT * FROM myapp.users_status WHERE device_id = $1
-        """, device_id)
-        
-        cfg_rows = await conn.fetch("SELECT key, value FROM myapp.app_config")
-        configs = {r["key"]: r["value"] for r in cfg_rows}
-
-    user = dict(user_row) if user_row else None
-    speed_info = calculate_effective_delay(user, configs)
-
-    if not user:
-        return {
-            "registered": False,
-            "status": "Inactive",
-            "message": "الجهاز غير مسجل أو يحتاج إلى تفعيل كود جديد",
-            "click_delay": speed_info["delay"],
-            "speed_info": speed_info
-        }
-
-    # التحقق من صلاحية الاشتراك والتجميد
-    is_expired = False
-    if user.get("expiry_date"):
-        if user["expiry_date"].replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
-            is_expired = True
-
-    return {
-        "registered": True,
-        "device_id": user["device_id"],
-        "phone": user.get("phone"),
-        "status": "Expired" if is_expired else user.get("status", "Active"),
-        "is_frozen": user.get("is_frozen", False),
-        "notice_message": user.get("notice_message") or configs.get("global_notice", ""),
-        "expiry_date": user.get("expiry_date"),
-        "click_delay": speed_info["delay"],
-        "speed_info": speed_info,
-        "accepted_clicks": user.get("accepted_clicks", 0)
-    }
-
-
-# ===================================================================================
-# 6. مسارات لوحة التحكم والإحصائيات (ADMIN API & HEALTH)
-# ===================================================================================
-@app.get("/api/health")
-async def health_check():
-    """فحص سلامة السيرفر وقاعدة البيانات"""
+@contextmanager
+def get_db_cursor(commit: bool = False):
+    """مدير سياق للتعامل الآمن مع اتصالات واستعلامات PostgreSQL."""
+    cp = get_connection_pool()
+    if cp is None:
+        raise RuntimeError("قاعدة البيانات غير متصلة.")
+    conn = cp.getconn()
     try:
-        async with db_pool.acquire() as conn:
-            row = await conn.fetchrow("""
-                SELECT NOW() as now, 
-                       (SELECT COUNT(*) FROM myapp.users_status) as users_count,
-                       (SELECT COUNT(*) FROM myapp.bot_logs) as logs_count
-            """)
-        return {
-            "status": "online",
-            "engine": "Python FastAPI",
-            "database": "Neon PostgreSQL Connected",
-            "server_time": str(row["now"]),
-            "users_count": row["users_count"],
-            "logs_count": row["logs_count"]
-        }
+        with conn.cursor(cursor_factory=extras.RealDictCursor) as cur:
+            yield cur
+        if commit:
+            conn.commit()
+    except Exception as err:
+        conn.rollback()
+        raise err
+    finally:
+        cp.putconn(conn)
+
+
+def query_db(sql: str, params: Optional[Union[Tuple, Dict]] = None) -> Optional[pd.DataFrame]:
+    """تنفيذ استعلام SELECT وإرجاع النتائج كـ DataFrame."""
+    try:
+        with get_db_cursor(commit=False) as cur:
+            cur.execute(sql, params or ())
+            rows = cur.fetchall()
+            return pd.DataFrame(rows) if rows else pd.DataFrame()
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "detail": str(e)})
+        st.error(f"خطأ في الاستعلام: {e}")
+        return None
 
 
-@app.get("/api/users")
-async def list_users():
-    """جلب قائمة المستخدمين لصفحة التحكم"""
-    async with db_pool.acquire() as conn:
-        rows = await conn.fetch("""
-            SELECT device_id, phone, status, sub_tier, accepted_clicks, 
-                   device_model, is_frozen, expiry_date, last_active 
-            FROM myapp.users_status 
-            ORDER BY last_active DESC NULLS LAST 
-            LIMIT 100
-        """)
-    return [dict(r) for r in rows]
+def run_query(sql: str, params: Optional[Union[Tuple, Dict]] = None, is_select: bool = False):
+    """تنفيذ استعلام إجرائي (INSERT/UPDATE/DELETE)."""
+    try:
+        with get_db_cursor(commit=not is_select) as cur:
+            cur.execute(sql, params or ())
+            if is_select:
+                return cur.fetchall()
+            return cur.rowcount
+    except Exception as e:
+        st.error(f"خطأ في تنفيذ الأمر: {e}")
+        return None
 
 
-@app.post("/api/admin/toggle-freeze")
-async def toggle_freeze(payload: Dict[str, Any]):
-    """تجميد أو فك تجميد هاتف مستخدم"""
-    dev_id = payload.get("device_id")
-    freeze = bool(payload.get("freeze"))
-    async with db_pool.acquire() as conn:
-        await conn.execute("""
-            UPDATE myapp.users_status 
-            SET is_frozen = $1, last_active = NOW() 
-            WHERE device_id = $2
-        """, freeze, dev_id)
-    return {"success": True, "device_id": dev_id, "is_frozen": freeze}
+def get_app_config() -> Dict[str, str]:
+    """استرجاع إعدادات المنظومة من myapp.app_config."""
+    df = query_db("SELECT key, value FROM myapp.app_config")
+    if df is not None and not df.empty:
+        return dict(zip(df["key"], df["value"]))
+    return {}
 
 
-@app.get("/api/app-config")
-async def get_app_config():
-    """جلب إعدادات النظام وسرعات الفئات"""
-    async with db_pool.acquire() as conn:
-        rows = await conn.fetch("SELECT key, value FROM myapp.app_config")
-    return {r["key"]: r["value"] for r in rows}
+def save_config(key: str, value: str):
+    """تحديث أو إدراج متغير في myapp.app_config."""
+    sql = """
+        INSERT INTO myapp.app_config (key, value)
+        VALUES (%s, %s)
+        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+    """
+    return run_query(sql, (key, str(value)))
 
 
-@app.post("/api/app-config")
-async def update_app_config(configs: Dict[str, str]):
-    """تحديث إعدادات النظام وسرعات النقر"""
-    async with db_pool.acquire() as conn:
-        for k, v in configs.items():
-            await conn.execute("""
-                INSERT INTO myapp.app_config (key, value)
-                VALUES ($1, $2)
-                ON CONFLICT (key) DO UPDATE SET value = $2
-            """, k, str(v))
-    return {"success": True, "message": "تم تحديث الإعدادات بنجاح"}
+# ============================================================
+# 3. مكونات الواجهة والمساعدات البصرية
+# ============================================================
+def page_header(title: str, subtitle: str = ""):
+    st.markdown(
+        f"""
+        <div style="margin-bottom: 1.5rem; padding-bottom: 0.8rem; border-bottom: 2px solid #e2edf2;">
+            <h1 style="color: #24445b; font-size: 1.9rem; font-weight: 900; margin: 0;">{title}</h1>
+            {f'<p style="color: #587184; font-size: 0.95rem; margin-top: 0.3rem;">{subtitle}</p>' if subtitle else ''}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
-# ===================================================================================
-# 7. نقطة الدخول والتشغيل المباشر
-# ===================================================================================
-if __name__ == "__main__":
-    import uvicorn
-    print("=" * 70)
-    print("🚀 بدء تشغيل خادم التحكم والبوتات بالبايثون (FastAPI Engine)...")
-    print(f"📡 المنفذ المستمع: {PORT}")
-    print(f"🔗 فحص الصحة: http://localhost:{PORT}/api/health")
-    print(f"📊 تدفق التيليميتري: http://localhost:{PORT}/api/telemetry/stream")
-    print("=" * 70)
-    uvicorn.run("server:app", host="0.0.0.0", port=PORT, reload=False)
+# ============================================================
+# 4. القائمة الجانبية (Navigation Bar)
+# ============================================================
+with st.sidebar:
+    st.markdown(
+        """
+        <div style="text-align: center; padding: 1.2rem 0; border-bottom: 1px solid #d7e5ec; margin-bottom: 1.5rem;">
+            <div style="background: linear-gradient(135deg, #159fbe 0%, #0f7a93 100%); width: 55px; height: 55px; border-radius: 16px; margin: 0 auto; display: flex; align-items: center; justify-content: center; box-shadow: 0 6px 16px rgba(21, 159, 190, 0.35);">
+                <span style="font-size: 26px; color: white;">⚡</span>
+            </div>
+            <h2 style="color: #24445b; font-size: 1.35rem; font-weight: 900; margin: 0.8rem 0 0.2rem 0;">MYCLICKER PRO</h2>
+            <span style="background: #e0f2fe; color: #0284c7; padding: 3px 10px; border-radius: 8px; font-size: 0.75rem; font-weight: 800;">إصدار السيطرة المركزية 2026</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    menu = st.radio(
+        "الانتقال السريع:",
+        [
+            "📈 نظرة عامة وإحصائيات النظام",
+            "📢 مركز الإشعارات المنسدلة (Heads-Up)",
+            "👥 إدارة أسطول الكباتن وتفعيل الاشتراكات",
+            "💳 توليد وإدارة أكواد الشحن",
+            "⚡ تحديث البيانات الحية (LIVE UPDATE)",
+            "🚀 إدارة التحديثات الإجبارية",
+            "🎮 بوابة ربط المحاكيات و ADB",
+            "🔍 فحص وتحليل سجلات التيليميتري",
+            "🖥️ حالة السيرفر وقاعدة البيانات",
+        ],
+        index=0,
+    )
+
+    st.markdown("---")
+    st.caption("🟢 قاعدة بيانات Neon متصلة ومحمية")
+
+
+# ============================================================
+# 5. الصفحات الرئيسية
+# ============================================================
+
+# 1. نظرة عامة وإحصائيات
+if menu.startswith("📈"):
+    page_header("📈 نظرة عامة وإحصائيات الأسطول", "مراقبة حية فورية لكافة مؤشرات الأداء والاشتراكات.")
+
+    stats_df = query_db(
+        """
+        SELECT 
+            COUNT(*) as total_users,
+            COUNT(*) FILTER (WHERE status = 'Active') as active_users,
+            COUNT(*) FILTER (WHERE is_frozen = TRUE) as frozen_users,
+            COUNT(*) FILTER (WHERE last_active >= NOW() - INTERVAL '3 minutes') as online_now,
+            COALESCE(SUM(accepted_clicks), 0) as total_clicks
+        FROM myapp.users_status
+    """
+    )
+
+    if stats_df is not None and not stats_df.empty:
+        r = stats_df.iloc[0]
+        c1, c2, c3, c4, c5 = st.columns(5)
+        c1.metric("إجمالي الأجهزة", f"{r['total_users']:,}")
+        c2.metric("🟢 متصل الآن", f"{r['online_now']:,}")
+        c3.metric("مفعّل ونشط", f"{r['active_users']:,}")
+        c4.metric("❄️ مجمّد", f"{r['frozen_users']:,}")
+        c5.metric("إجمالي النقرات", f"{r['total_clicks']:,}")
+
+    st.markdown("---")
+    st.subheader("📊 توزيع الكباتن حسب فئات الاشتراك")
+    tiers_df = query_db(
+        """
+        SELECT COALESCE(sub_tier, 'STANDARD') as tier, COUNT(*) as count 
+        FROM myapp.users_status 
+        GROUP BY sub_tier
+    """
+    )
+    if tiers_df is not None and not tiers_df.empty:
+        fig = px.pie(
+            tiers_df,
+            names="tier",
+            values="count",
+            color="tier",
+            color_discrete_map={"VIP": "#8b5cf6", "STANDARD": "#0ea5e9", "TRIAL": "#f59e0b"},
+            hole=0.45,
+        )
+        fig.update_layout(margin=dict(t=10, b=10, l=10, r=10), height=300)
+        st.plotly_chart(fig, use_container_width=True)
+
+# 2. مركز الإشعارات المنسدلة
+elif menu.startswith("📢"):
+    page_header("📢 مركز الإشعارات المنسدلة والعائمة", "بث إشعارات Heads-Up Dropdown لكافة الهواتف أو لكابتن محدد.")
+    t_broad, t_indiv = st.tabs(["🚀 بث إشعار عام للأسطول", "🎯 إشعار فردي لكابتن محدد"])
+
+    with t_broad:
+        st.subheader("بث إشعار منسدل عام للجميع")
+        b_title = st.text_input("عنوان الإشعار", value="تنبيه هام من الإدارة ⚡")
+        b_msg = st.text_area("نص الإشعار المنسدل", value="يرجى فتح التطبيق لمتابعة العروض الجديدة!")
+
+        if st.button("🚀 بث الإشعار الآن للجميع", type="primary"):
+            if b_msg.strip():
+                clean_msg = b_msg.strip()
+                notif_ver = str(int(time.time() * 1000))
+                save_config("notice_message", clean_msg)
+                save_config("notification_version", notif_ver)
+                save_config("notification_type", "heads_up_drop_down")
+                save_config("notice_title", b_title)
+
+                run_query(
+                    """
+                    UPDATE myapp.users_status 
+                    SET notice_message = %s,
+                        notification_version = %s
+                """,
+                    (clean_msg, notif_ver),
+                )
+
+                st.success("✅ تم بث الإشعار المنسدل لكافة الهواتف بنجاح!")
+            else:
+                st.warning("يرجى كتابة نص الإشعار أولاً.")
+
+    with t_indiv:
+        st.subheader("إرسال إشعار لكابتن محدد")
+        phone_target = st.text_input("رقم هاتف الكابتن المستهدف", placeholder="078XXXXXXX")
+        indiv_msg = st.text_area("نص الإشعار الخاص به", value="تنبيه خاص: تم تحديث بيانات حسابك.")
+
+        if st.button("⚡ إرسال الإشعار الفردي لهذا الكابتن", type="primary"):
+            if phone_target.strip() and indiv_msg.strip():
+                notif_ver = str(int(time.time() * 1000))
+                rows = run_query(
+                    """
+                    UPDATE myapp.users_status 
+                    SET notice_message = %s,
+                        notification_version = %s
+                    WHERE phone = %s OR phone ILIKE %s
+                """,
+                    (indiv_msg.strip(), notif_ver, phone_target.strip(), f"%{phone_target.strip()}%"),
+                )
+                if rows and rows > 0:
+                    st.success(f"✅ تم إرسال الإشعار بنجاح إلى ({rows}) جهاز تابع لهذا الرقم!")
+                else:
+                    st.error("لم يتم العثور على جهاز مسجل بهذا الرقم في قاعدة البيانات.")
+            else:
+                st.warning("يرجى ملء رقم الهاتف ونص الإشعار.")
+
+# 3. إدارة أسطول الكباتن
+elif menu.startswith("👥"):
+    page_header("👥 إدارة أسطول الكباتن والاشتراكات", "استعراض الأجهزة، تفعيل الكباتن، وتجميد/إلغاء تجميد الحسابات.")
+
+    users_df = query_db(
+        """
+        SELECT 
+            device_id, phone, status, sub_tier, accepted_clicks, is_frozen, app_version, device_model,
+            CASE WHEN last_active >= NOW() - INTERVAL '3 minutes' THEN '🟢 متصل' ELSE '🔴 غير متصل' END AS bot_status
+        FROM myapp.users_status
+        ORDER BY last_active DESC NULLS LAST
+        LIMIT 100
+    """
+    )
+
+    if users_df is not None and not users_df.empty:
+        st.dataframe(users_df, use_container_width=True, height=450)
+    else:
+        st.info("لا توجد أجهزة مسجلة في قاعدة البيانات حالياً.")
+
+# 4. توليد وإدارة الأكواد
+elif menu.startswith("💳"):
+    page_header("💳 توليد وإدارة أكواد الشحن", "إنشاء أكواد شحن فورية للاشتراكات.")
+    c_q1, c_q2 = st.columns(2)
+    qty = c_q1.number_input("عدد الأكواد المراد توليدها", min_value=1, max_value=50, value=5)
+    days = c_q2.selectbox("مدة الاشتراك بالأيام", [7, 30, 90, 365], index=1)
+
+    if st.button("⚡ توليد الأكواد الآن", type="primary"):
+        generated = []
+        for _ in range(qty):
+            code_str = "VIP-" + hashlib.sha256(os.urandom(16)).hexdigest()[:10].upper()
+            run_query(
+                """
+                INSERT INTO myapp.subscriptions (code, duration_days, category, is_used, created_at)
+                VALUES (%s, %s, 'VIP', FALSE, NOW())
+            """,
+                (code_str, days),
+            )
+            generated.append(code_str)
+        st.success(f"تم بنجاح توليد {len(generated)} كود شحن:")
+        st.code("\n".join(generated))
+
+# 5. تحديث البيانات الحية
+elif menu.startswith("⚡"):
+    page_header("⚡ تحديث البيانات الحية (LIVE UPDATE)", "تعديل الكلمات المفتاحية ومؤشرات الشاشة الفورية للبوت.")
+    cfg = get_app_config()
+
+    cur_keys = cfg.get("live_keywords", "قبول العرض,قبول,ACCEPT,Accept,Accept Offer")
+    cur_inds = cfg.get("live_indicators", "JOD,د.أ,JD,يبعد,طلب جديد,mins away,Jeeny Driver,سفير بترا رايد")
+
+    new_keys = st.text_area("🎯 كلمات قبول العروض الحية (live_keywords)", value=cur_keys)
+    new_inds = st.text_area("📡 مؤشرات قراءة الشاشة (live_indicators)", value=cur_inds)
+
+    if st.button("💾 حفظ وتعميم البيانات الحية", type="primary"):
+        save_config("live_keywords", new_keys.strip())
+        save_config("live_indicators", new_inds.strip())
+        save_config("click_delay", "0")
+        st.success("✅ تم حفظ ومزامنة البيانات الحية وتعميمها على جميع الأجهزة فوراً!")
+
+# 6. التحديثات الإجبارية
+elif menu.startswith("🚀"):
+    page_header("🚀 إدارة التحديثات الإجبارية", "إلزام الكباتن بالترقية إلى أحدث إصدار من التطبيق.")
+    cfg = get_app_config()
+    cur_ver = cfg.get("latest_version", "7.2.8")
+    cur_forced = cfg.get("force_update", "false") == "true"
+    cur_apk = cfg.get("apk_url", "https://example.com/update.apk")
+
+    n_ver = st.text_input("أحدث إصدار مطلوب", value=cur_ver)
+    n_apk = st.text_input("رابط تحميل التحديث (APK)", value=cur_apk)
+    n_forced = st.checkbox("تفعيل التحديث الإجباري (Force Update)", value=cur_forced)
+
+    if st.button("💾 تطبيق إعدادات التحديث", type="primary"):
+        save_config("latest_version", n_ver.strip())
+        save_config("apk_url", n_apk.strip())
+        save_config("force_update", "true" if n_forced else "false")
+        st.success("✅ تم تحديث إعدادات الإصدار بنجاح.")
+
+# 7. بوابة ربط المحاكيات
+elif menu.startswith("🎮"):
+    page_header("🎮 بوابة ربط المحاكيات و ADB", "ربط محاكي الأندرويد بقاعدة البيانات برقم الهاتف.")
+    ph = st.text_input("📱 رقم هاتف الكابتن لربط المحاكي", placeholder="078XXXXXXX")
+    emu_name = st.selectbox("نوع المحاكي", ["LDPlayer 9 Android", "Nox Player", "BlueStacks 5"])
+
+    if st.button("⚡ ربط المحاكي وتثبيته في Neon", type="primary"):
+        if ph.strip():
+            dev_id = f"emu_{hashlib.md5(ph.strip().encode()).hexdigest()[:8]}"
+            run_query(
+                """
+                INSERT INTO myapp.users_status (device_id, phone, status, sub_tier, device_model, is_frozen, last_active)
+                VALUES (%s, %s, 'Active', 'VIP', %s, FALSE, NOW())
+                ON CONFLICT (device_id) DO UPDATE SET phone = EXCLUDED.phone, last_active = NOW()
+            """,
+                (dev_id, ph.strip(), emu_name),
+            )
+            st.success(f"✅ تم ربط المحاكي بنجاح! المعرف: `{dev_id}`")
+        else:
+            st.warning("يرجى كتابة رقم الهاتف.")
+
+# 8. فحص التيليميتري
+elif menu.startswith("🔍"):
+    page_header("🔍 فحص وتحليل سجلات التيليميتري", "استعراض النقرات والاستجابات المسجلة.")
+    logs_df = query_db("SELECT * FROM myapp.bot_logs ORDER BY created_at DESC LIMIT 50")
+    if logs_df is not None and not logs_df.empty:
+        st.dataframe(logs_df, use_container_width=True)
+    else:
+        st.info("لا توجد سجلات تيليميتري مرصودة حالياً.")
+
+# 9. حالة السيرفر
+else:
+    page_header("🖥️ حالة السيرفر وقاعدة البيانات", "فحص استقرار قاعدة بيانات Neon.")
+    res = query_db("SELECT NOW() as db_time, COUNT(*) as users_count FROM myapp.users_status")
+    if res is not None and not res.empty:
+        st.success(f"🟢 قاعدة بيانات Neon متصلة وتعمل بكفاءة تامة! وقت السيرفر: {res.iloc[0]['db_time']}")
+    else:
+        st.error("تعذر الاتصال بقاعدة البيانات.")
