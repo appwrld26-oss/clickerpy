@@ -1,505 +1,340 @@
-# -*- coding: utf-8 -*-
-"""
-===================================================================================
-⚡ MYCLICKER PRO | ULTIMATE COMMAND & CONTROL DASHBOARD (STREAMLIT CLOUD READY)
-===================================================================================
-لوحة تحكم وإدارة كاملة بنظام Streamlit تدعم:
-1. اتصالات Neon Serverless PostgreSQL مع حماية من الانقطاع (Auto-reconnect & Rollback).
-2. إرسال وبث الإشعارات المنسدلة الحية (Heads-Up & Floating Dropdown) للأسطول أو فردياً برقم هاتف الكابتن.
-3. دعم التفعيل الفوري (UPSERT) والتوافق الكامل مع تطبيق الأندرويد والمحاكيات.
-4. لوحة مراقبة الأسطول، تفعيل الاشتراكات، وسجلات التيليميتري (نقر فوري مباشر ⚡).
-===================================================================================
-"""
-
-import hashlib
-import json
-import os
-import time
-from contextlib import contextmanager
-from datetime import datetime, timezone
-from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
-
-import numpy as np
-import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
-import psycopg2
-from psycopg2 import pool, extras
 import streamlit as st
+import pandas as pd
+from datetime import datetime
 
-
-# ============================================================
-# 1. إعداد الصفحة والتنسيق البصري (RTL & Modern Arabic UI)
-# ============================================================
+# إعدادات صفحة لوحة التحكم
 st.set_page_config(
-    page_title="MyClicker Pro | لوحة التحكم المركزية",
+    page_title="MyClicker Pro | لوحة التحكم المركزية للإدارة والمستودع",
     page_icon="⚡",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="expanded"
 )
 
-st.markdown(
-    """
+# تصميم وتنسيق عصري متطور (Dark Cyber Theme)
+st.markdown("""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&display=swap');
-
-    :root {
-        --primary: #159fbe;
-        --primary-dark: #0f7a93;
-        --bg-main: #f4f8fb;
-        --card-bg: #ffffff;
-        --text-main: #24445b;
-        --text-sub: #587184;
-        --border-color: #d7e5ec;
-        --success: #10b981;
-        --warning: #f59e0b;
-        --danger: #ef4444;
-    }
-
-    * {
-        font-family: 'Cairo', sans-serif !important;
-    }
-
-    .stApp {
-        background-color: var(--bg-main);
-        direction: rtl;
-        text-align: right;
-    }
-
-    .main .block-container {
-        padding-top: 1.5rem;
-        padding-bottom: 3rem;
-        max-width: 1400px;
-    }
-
-    /* كروت المقاييس العلوية */
-    div[data-testid="stMetric"] {
-        background: var(--card-bg);
-        border: 1px solid var(--border-color);
-        border-radius: 18px;
-        padding: 18px 22px;
-        box-shadow: 0 4px 15px rgba(21, 159, 190, 0.05);
-        transition: transform 0.2s ease, box-shadow 0.2s ease;
-    }
-    div[data-testid="stMetric"]:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 8px 22px rgba(21, 159, 190, 0.12);
-        border-color: var(--primary);
-    }
-    div[data-testid="stMetricLabel"] {
-        font-size: 0.95rem !important;
-        font-weight: 700 !important;
-        color: var(--text-sub) !important;
-    }
-    div[data-testid="stMetricValue"] {
-        font-size: 1.8rem !important;
-        font-weight: 900 !important;
-        color: var(--text-main) !important;
-    }
-
-    /* الأزرار العصرية */
-    div.stButton > button {
-        border-radius: 14px !important;
-        font-weight: 800 !important;
-        padding: 0.55rem 1.4rem !important;
-        transition: all 0.2s ease !important;
-        border: none !important;
-    }
-    div.stButton > button[kind="primary"] {
-        background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%) !important;
-        color: white !important;
-        box-shadow: 0 4px 14px rgba(21, 159, 190, 0.35) !important;
-    }
-    div.stButton > button[kind="primary"]:hover {
-        box-shadow: 0 6px 20px rgba(21, 159, 190, 0.5) !important;
-        transform: translateY(-1px);
-    }
-
-    /* الحقول والمدخلات */
-    div[data-baseweb="input"], div[data-baseweb="select"] {
-        border-radius: 12px !important;
-    }
-
-    /* الجداول */
-    .stDataFrame {
-        border-radius: 16px;
-        overflow: hidden;
-        border: 1px solid var(--border-color);
-        box-shadow: 0 4px 16px rgba(0,0,0,0.02);
-    }
-
-    /* تنبيهات الحالة */
-    .stAlert {
-        border-radius: 14px !important;
-        font-weight: 700 !important;
-    }
+    .main { background-color: #0b1120; color: #f8fafc; }
+    .stSidebar { background-color: #1e293b; color: #f8fafc; }
+    .metric-card { background: #1e293b; border: 1px solid #334155; padding: 18px; border-radius: 14px; box-shadow: 0 4px 20px rgba(0,0,0,0.3); }
+    .stButton>button { background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%); color: white; border-radius: 10px; font-weight: bold; border: none; padding: 10px 20px; }
+    .stButton>button:hover { background: linear-gradient(135deg, #0369a1 0%, #0284c7 100%); }
     </style>
-    """,
-    unsafe_allow_html=True,
-)
+""", unsafe_allow_html=True)
 
+# تهيئة الذاكرة المؤقتة (Session State)
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+if "username" not in st.session_state:
+    st.session_state.username = ""
+if "is_master" not in st.session_state:
+    st.session_state.is_master = False
+if "master_device_id" not in st.session_state:
+    st.session_state.master_device_id = ""
 
-# ============================================================
-# 2. إدارة قاعدة البيانات والاتصال الآمن بـ Neon PostgreSQL
-# ============================================================
-DEFAULT_NEON_URL = (
-    "postgresql://neondb_owner:npg_AvzFkHQ6M3yo@ep-tiny-wind-ayd9hww0-pooler.c-5.us-east-2.aws.neon.tech/neondb?sslmode=require"
-)
+if "available_codes" not in st.session_state:
+    st.session_state.available_codes = pd.DataFrame([
+        {"Code": "EMP-7D-9982", "DurationDays": 7, "Tier": "VIP", "Vendor": "المالك (Master)", "CreatedAt": "2026-10-01 10:00"},
+        {"Code": "EMP-30-1124", "DurationDays": 30, "Tier": "PRO", "Vendor": "بائع (أحمد)", "CreatedAt": "2026-10-02 12:30"},
+        {"Code": "EMP-30-5561", "DurationDays": 30, "Tier": "PRO", "Vendor": "بائع (خالد)", "CreatedAt": "2026-10-03 14:15"},
+        {"Code": "EMP-90-8812", "DurationDays": 90, "Tier": "VIP", "Vendor": "المالك (Master)", "CreatedAt": "2026-10-04 09:00"}
+    ])
 
-DATABASE_URL = os.getenv("DATABASE_URL", DEFAULT_NEON_URL)
-# تنظيف معامل channel_binding لضمان التوافق التام مع psycopg2
-CLEAN_DATABASE_URL = DATABASE_URL.replace("&channel_binding=require", "")
+if "used_codes" not in st.session_state:
+    st.session_state.used_codes = pd.DataFrame([
+        {"Code": "EMP-30-0012", "DurationDays": 30, "Tier": "PRO", "Vendor": "بائع (أحمد)", "UsedByDevice": "d201451dda15bc31", "Phone": "+962770000000", "UsedAt": "2026-10-03 16:20", "Responsible": "أحمد (مندوب)"},
+        {"Code": "EMP-7D-4411", "DurationDays": 7, "Tier": "STANDARD", "Vendor": "المالك (Master)", "UsedByDevice": "c9811fa488b211ef", "Phone": "+962791111111", "UsedAt": "2026-10-04 11:10", "Responsible": "المالك (Master)"}
+    ])
 
+if "fleet_devices" not in st.session_state:
+    st.session_state.fleet_devices = pd.DataFrame([
+        {"DeviceId": "d201451dda15bc31", "Phone": "+962770000000", "DeviceModel": "Samsung Galaxy S23", "AppVersion": "7.3.0", "Status": "Active", "SubTier": "PRO", "ExpiryDate": "2026-11-02", "LastSeen": "منذ دقيقة"},
+        {"DeviceId": "c9811fa488b211ef", "Phone": "+962791111111", "DeviceModel": "Xiaomi Redmi Note 12", "AppVersion": "7.3.0", "Status": "Active", "SubTier": "STANDARD", "ExpiryDate": "2026-10-11", "LastSeen": "منذ 5 دقائق"}
+    ])
 
-@st.cache_resource(show_spinner=False)
-def get_connection_pool():
-    """تهيئة تجمع اتصالات Neon آمن وقابل للاسترجاع التلقائي."""
-    try:
-        connection_pool = pool.ThreadedConnectionPool(
-            minconn=1,
-            maxconn=15,
-            dsn=CLEAN_DATABASE_URL,
-            connect_timeout=10,
-            application_name="MyClickerStreamlitDashboard",
-        )
-        return connection_pool
-    except Exception as e:
-        st.error(f"❌ خطأ أثناء إنشاء تجمع الاتصال بقاعدة البيانات: {e}")
-        return None
+if "audit_logs" not in st.session_state:
+    st.session_state.audit_logs = pd.DataFrame([
+        {"Timestamp": "2026-10-04 11:10", "Action": "تفعيل مستخدم", "Code": "EMP-7D-4411", "Device": "c9811fa488b211ef", "Operator": "المالك (Master)"},
+        {"Timestamp": "2026-10-03 16:20", "Action": "نسخ كود", "Code": "EMP-30-0012", "Device": "N/A", "Operator": "أحمد (مندوب)"}
+    ])
 
+# نافذة تسجيل الدخول في الشريط الجانبي مع تسجيل رقم الجهاز بصمة (Device Fingerprint)
+st.sidebar.markdown("## 🔐 بوابة تسجيل الدخول الموثق")
+if not st.session_state.authenticated:
+    login_user = st.sidebar.text_input("اسم المستخدم (Username)")
+    login_pass = st.sidebar.text_input("كلمة المرور (Password)", type="password")
+    device_serial = st.sidebar.text_input("معرف جهاز المالك / البائع (Device ID / Fingerprint)", "MASTER-DEV-9982")
+    
+    if st.sidebar.button("تسجيل الدخول"):
+        if login_user == "master" and login_pass == "EMPEROR_MASTER_2026":
+            st.session_state.authenticated = True
+            st.session_state.username = "المالك (Master)"
+            st.session_state.is_master = True
+            st.session_state.master_device_id = device_serial if device_serial else "MASTER-DEV-9982"
+            
+            new_audit = pd.DataFrame([{
+                "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                "Action": "تسجيل دخول المالك",
+                "Code": "N/A",
+                "Device": st.session_state.master_device_id,
+                "Operator": "المالك (Master)"
+            }])
+            st.session_state.audit_logs = pd.concat([st.session_state.audit_logs, new_audit], ignore_index=True)
 
-@contextmanager
-def get_db_cursor(commit: bool = False):
-    """مدير سياق للتعامل الآمن مع اتصالات واستعلامات PostgreSQL."""
-    cp = get_connection_pool()
-    if cp is None:
-        raise RuntimeError("قاعدة البيانات غير متصلة.")
-    conn = cp.getconn()
-    try:
-        with conn.cursor(cursor_factory=extras.RealDictCursor) as cur:
-            yield cur
-        if commit:
-            conn.commit()
-    except Exception as err:
-        conn.rollback()
-        raise err
-    finally:
-        cp.putconn(conn)
+            st.sidebar.success(f"✅ أهلاً بك يا مالك النظام | الجهاز: {st.session_state.master_device_id}")
+            st.rerun()
+        elif login_user and login_pass:
+            st.session_state.authenticated = True
+            st.session_state.username = f"بائع ({login_user})"
+            st.session_state.is_master = False
+            st.session_state.master_device_id = device_serial if device_serial else "VENDOR-DEV-0000"
+            
+            new_audit = pd.DataFrame([{
+                "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                "Action": "تسجيل دخول بائع",
+                "Code": "N/A",
+                "Device": st.session_state.master_device_id,
+                "Operator": st.session_state.username
+            }])
+            st.session_state.audit_logs = pd.concat([st.session_state.audit_logs, new_audit], ignore_index=True)
 
-
-def query_db(sql: str, params: Optional[Union[Tuple, Dict]] = None) -> Optional[pd.DataFrame]:
-    """تنفيذ استعلام SELECT وإرجاع النتائج كـ DataFrame."""
-    try:
-        with get_db_cursor(commit=False) as cur:
-            cur.execute(sql, params or ())
-            rows = cur.fetchall()
-            return pd.DataFrame(rows) if rows else pd.DataFrame()
-    except Exception as e:
-        st.error(f"خطأ في الاستعلام: {e}")
-        return None
-
-
-def run_query(sql: str, params: Optional[Union[Tuple, Dict]] = None, is_select: bool = False):
-    """تنفيذ استعلام إجرائي (INSERT/UPDATE/DELETE)."""
-    try:
-        with get_db_cursor(commit=not is_select) as cur:
-            cur.execute(sql, params or ())
-            if is_select:
-                return cur.fetchall()
-            return cur.rowcount
-    except Exception as e:
-        st.error(f"خطأ في تنفيذ الأمر: {e}")
-        return None
-
-
-def get_app_config() -> Dict[str, str]:
-    """استرجاع إعدادات المنظومة من myapp.app_config."""
-    df = query_db("SELECT key, value FROM myapp.app_config")
-    if df is not None and not df.empty:
-        return dict(zip(df["key"], df["value"]))
-    return {}
-
-
-def save_config(key: str, value: str):
-    """تحديث أو إدراج متغير في myapp.app_config."""
-    sql = """
-        INSERT INTO myapp.app_config (key, value)
-        VALUES (%s, %s)
-        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
-    """
-    return run_query(sql, (key, str(value)))
-
-
-# ============================================================
-# 3. مكونات الواجهة والمساعدات البصرية
-# ============================================================
-def page_header(title: str, subtitle: str = ""):
-    st.markdown(
-        f"""
-        <div style="margin-bottom: 1.5rem; padding-bottom: 0.8rem; border-bottom: 2px solid #e2edf2;">
-            <h1 style="color: #24445b; font-size: 1.9rem; font-weight: 900; margin: 0;">{title}</h1>
-            {f'<p style="color: #587184; font-size: 0.95rem; margin-top: 0.3rem;">{subtitle}</p>' if subtitle else ''}
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-# ============================================================
-# 4. القائمة الجانبية (Navigation Bar)
-# ============================================================
-with st.sidebar:
-    st.markdown(
-        """
-        <div style="text-align: center; padding: 1.2rem 0; border-bottom: 1px solid #d7e5ec; margin-bottom: 1.5rem;">
-            <div style="background: linear-gradient(135deg, #159fbe 0%, #0f7a93 100%); width: 55px; height: 55px; border-radius: 16px; margin: 0 auto; display: flex; align-items: center; justify-content: center; box-shadow: 0 6px 16px rgba(21, 159, 190, 0.35);">
-                <span style="font-size: 26px; color: white;">⚡</span>
-            </div>
-            <h2 style="color: #24445b; font-size: 1.35rem; font-weight: 900; margin: 0.8rem 0 0.2rem 0;">MYCLICKER PRO</h2>
-            <span style="background: #e0f2fe; color: #0284c7; padding: 3px 10px; border-radius: 8px; font-size: 0.75rem; font-weight: 800;">إصدار السيطرة المركزية 2026</span>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    menu = st.radio(
-        "الانتقال السريع:",
-        [
-            "📈 نظرة عامة وإحصائيات النظام",
-            "📢 مركز الإشعارات المنسدلة (Heads-Up)",
-            "👥 إدارة أسطول الكباتن وتفعيل الاشتراكات",
-            "💳 توليد وإدارة أكواد الشحن",
-            "⚡ تحديث البيانات الحية (LIVE UPDATE)",
-            "🚀 إدارة التحديثات الإجبارية",
-            "🎮 بوابة ربط المحاكيات و ADB",
-            "🔍 فحص وتحليل سجلات التيليميتري",
-            "🖥️ حالة السيرفر وقاعدة البيانات",
-        ],
-        index=0,
-    )
-
-    st.markdown("---")
-    st.caption("🟢 قاعدة بيانات Neon متصلة ومحمية")
-
-
-# ============================================================
-# 5. الصفحات الرئيسية
-# ============================================================
-
-# 1. نظرة عامة وإحصائيات
-if menu.startswith("📈"):
-    page_header("📈 نظرة عامة وإحصائيات الأسطول", "مراقبة حية فورية لكافة مؤشرات الأداء والاشتراكات.")
-
-    stats_df = query_db(
-        """
-        SELECT 
-            COUNT(*) as total_users,
-            COUNT(*) FILTER (WHERE status = 'Active') as active_users,
-            COUNT(*) FILTER (WHERE is_frozen = TRUE) as frozen_users,
-            COUNT(*) FILTER (WHERE last_active >= NOW() - INTERVAL '3 minutes') as online_now,
-            COALESCE(SUM(accepted_clicks), 0) as total_clicks
-        FROM myapp.users_status
-    """
-    )
-
-    if stats_df is not None and not stats_df.empty:
-        r = stats_df.iloc[0]
-        c1, c2, c3, c4, c5 = st.columns(5)
-        c1.metric("إجمالي الأجهزة", f"{r['total_users']:,}")
-        c2.metric("🟢 متصل الآن", f"{r['online_now']:,}")
-        c3.metric("مفعّل ونشط", f"{r['active_users']:,}")
-        c4.metric("❄️ مجمّد", f"{r['frozen_users']:,}")
-        c5.metric("إجمالي النقرات", f"{r['total_clicks']:,}")
-
-    st.markdown("---")
-    st.subheader("📊 توزيع الكباتن حسب فئات الاشتراك")
-    tiers_df = query_db(
-        """
-        SELECT COALESCE(sub_tier, 'STANDARD') as tier, COUNT(*) as count 
-        FROM myapp.users_status 
-        GROUP BY sub_tier
-    """
-    )
-    if tiers_df is not None and not tiers_df.empty:
-        fig = px.pie(
-            tiers_df,
-            names="tier",
-            values="count",
-            color="tier",
-            color_discrete_map={"VIP": "#8b5cf6", "STANDARD": "#0ea5e9", "TRIAL": "#f59e0b"},
-            hole=0.45,
-        )
-        fig.update_layout(margin=dict(t=10, b=10, l=10, r=10), height=300)
-        st.plotly_chart(fig, use_container_width=True)
-
-# 2. مركز الإشعارات المنسدلة
-elif menu.startswith("📢"):
-    page_header("📢 مركز الإشعارات المنسدلة والعائمة", "بث إشعارات Heads-Up Dropdown لكافة الهواتف أو لكابتن محدد.")
-    t_broad, t_indiv = st.tabs(["🚀 بث إشعار عام للأسطول", "🎯 إشعار فردي لكابتن محدد"])
-
-    with t_broad:
-        st.subheader("بث إشعار منسدل عام للجميع")
-        b_title = st.text_input("عنوان الإشعار", value="تنبيه هام من الإدارة ⚡")
-        b_msg = st.text_area("نص الإشعار المنسدل", value="يرجى فتح التطبيق لمتابعة العروض الجديدة!")
-
-        if st.button("🚀 بث الإشعار الآن للجميع", type="primary"):
-            if b_msg.strip():
-                clean_msg = b_msg.strip()
-                notif_ver = str(int(time.time() * 1000))
-                save_config("notice_message", clean_msg)
-                save_config("notification_version", notif_ver)
-                save_config("notification_type", "heads_up_drop_down")
-                save_config("notice_title", b_title)
-
-                run_query(
-                    """
-                    UPDATE myapp.users_status 
-                    SET notice_message = %s,
-                        notification_version = %s
-                """,
-                    (clean_msg, notif_ver),
-                )
-
-                st.success("✅ تم بث الإشعار المنسدل لكافة الهواتف بنجاح!")
-            else:
-                st.warning("يرجى كتابة نص الإشعار أولاً.")
-
-    with t_indiv:
-        st.subheader("إرسال إشعار لكابتن محدد")
-        phone_target = st.text_input("رقم هاتف الكابتن المستهدف", placeholder="078XXXXXXX")
-        indiv_msg = st.text_area("نص الإشعار الخاص به", value="تنبيه خاص: تم تحديث بيانات حسابك.")
-
-        if st.button("⚡ إرسال الإشعار الفردي لهذا الكابتن", type="primary"):
-            if phone_target.strip() and indiv_msg.strip():
-                notif_ver = str(int(time.time() * 1000))
-                rows = run_query(
-                    """
-                    UPDATE myapp.users_status 
-                    SET notice_message = %s,
-                        notification_version = %s
-                    WHERE phone = %s OR phone ILIKE %s
-                """,
-                    (indiv_msg.strip(), notif_ver, phone_target.strip(), f"%{phone_target.strip()}%"),
-                )
-                if rows and rows > 0:
-                    st.success(f"✅ تم إرسال الإشعار بنجاح إلى ({rows}) جهاز تابع لهذا الرقم!")
-                else:
-                    st.error("لم يتم العثور على جهاز مسجل بهذا الرقم في قاعدة البيانات.")
-            else:
-                st.warning("يرجى ملء رقم الهاتف ونص الإشعار.")
-
-# 3. إدارة أسطول الكباتن
-elif menu.startswith("👥"):
-    page_header("👥 إدارة أسطول الكباتن والاشتراكات", "استعراض الأجهزة، تفعيل الكباتن، وتجميد/إلغاء تجميد الحسابات.")
-
-    users_df = query_db(
-        """
-        SELECT 
-            device_id, phone, status, sub_tier, accepted_clicks, is_frozen, app_version, device_model,
-            CASE WHEN last_active >= NOW() - INTERVAL '3 minutes' THEN '🟢 متصل' ELSE '🔴 غير متصل' END AS bot_status
-        FROM myapp.users_status
-        ORDER BY last_active DESC NULLS LAST
-        LIMIT 100
-    """
-    )
-
-    if users_df is not None and not users_df.empty:
-        st.dataframe(users_df, use_container_width=True, height=450)
-    else:
-        st.info("لا توجد أجهزة مسجلة في قاعدة البيانات حالياً.")
-
-# 4. توليد وإدارة الأكواد
-elif menu.startswith("💳"):
-    page_header("💳 توليد وإدارة أكواد الشحن", "إنشاء أكواد شحن فورية للاشتراكات.")
-    c_q1, c_q2 = st.columns(2)
-    qty = c_q1.number_input("عدد الأكواد المراد توليدها", min_value=1, max_value=50, value=5)
-    days = c_q2.selectbox("مدة الاشتراك بالأيام", [7, 30, 90, 365], index=1)
-
-    if st.button("⚡ توليد الأكواد الآن", type="primary"):
-        generated = []
-        for _ in range(qty):
-            code_str = "VIP-" + hashlib.sha256(os.urandom(16)).hexdigest()[:10].upper()
-            run_query(
-                """
-                INSERT INTO myapp.subscriptions (code, duration_days, category, is_used, created_at)
-                VALUES (%s, %s, 'VIP', FALSE, NOW())
-            """,
-                (code_str, days),
-            )
-            generated.append(code_str)
-        st.success(f"تم بنجاح توليد {len(generated)} كود شحن:")
-        st.code("\n".join(generated))
-
-# 5. تحديث البيانات الحية
-elif menu.startswith("⚡"):
-    page_header("⚡ تحديث البيانات الحية (LIVE UPDATE)", "تعديل الكلمات المفتاحية ومؤشرات الشاشة الفورية للبوت.")
-    cfg = get_app_config()
-
-    cur_keys = cfg.get("live_keywords", "قبول العرض,قبول,ACCEPT,Accept,Accept Offer")
-    cur_inds = cfg.get("live_indicators", "JOD,د.أ,JD,يبعد,طلب جديد,mins away,Jeeny Driver,سفير بترا رايد")
-
-    new_keys = st.text_area("🎯 كلمات قبول العروض الحية (live_keywords)", value=cur_keys)
-    new_inds = st.text_area("📡 مؤشرات قراءة الشاشة (live_indicators)", value=cur_inds)
-
-    if st.button("💾 حفظ وتعميم البيانات الحية", type="primary"):
-        save_config("live_keywords", new_keys.strip())
-        save_config("live_indicators", new_inds.strip())
-        save_config("click_delay", "0")
-        st.success("✅ تم حفظ ومزامنة البيانات الحية وتعميمها على جميع الأجهزة فوراً!")
-
-# 6. التحديثات الإجبارية
-elif menu.startswith("🚀"):
-    page_header("🚀 إدارة التحديثات الإجبارية", "إلزام الكباتن بالترقية إلى أحدث إصدار من التطبيق.")
-    cfg = get_app_config()
-    cur_ver = cfg.get("latest_version", "7.2.8")
-    cur_forced = cfg.get("force_update", "false") == "true"
-    cur_apk = cfg.get("apk_url", "https://example.com/update.apk")
-
-    n_ver = st.text_input("أحدث إصدار مطلوب", value=cur_ver)
-    n_apk = st.text_input("رابط تحميل التحديث (APK)", value=cur_apk)
-    n_forced = st.checkbox("تفعيل التحديث الإجباري (Force Update)", value=cur_forced)
-
-    if st.button("💾 تطبيق إعدادات التحديث", type="primary"):
-        save_config("latest_version", n_ver.strip())
-        save_config("apk_url", n_apk.strip())
-        save_config("force_update", "true" if n_forced else "false")
-        st.success("✅ تم تحديث إعدادات الإصدار بنجاح.")
-
-# 7. بوابة ربط المحاكيات
-elif menu.startswith("🎮"):
-    page_header("🎮 بوابة ربط المحاكيات و ADB", "ربط محاكي الأندرويد بقاعدة البيانات برقم الهاتف.")
-    ph = st.text_input("📱 رقم هاتف الكابتن لربط المحاكي", placeholder="078XXXXXXX")
-    emu_name = st.selectbox("نوع المحاكي", ["LDPlayer 9 Android", "Nox Player", "BlueStacks 5"])
-
-    if st.button("⚡ ربط المحاكي وتثبيته في Neon", type="primary"):
-        if ph.strip():
-            dev_id = f"emu_{hashlib.md5(ph.strip().encode()).hexdigest()[:8]}"
-            run_query(
-                """
-                INSERT INTO myapp.users_status (device_id, phone, status, sub_tier, device_model, is_frozen, last_active)
-                VALUES (%s, %s, 'Active', 'VIP', %s, FALSE, NOW())
-                ON CONFLICT (device_id) DO UPDATE SET phone = EXCLUDED.phone, last_active = NOW()
-            """,
-                (dev_id, ph.strip(), emu_name),
-            )
-            st.success(f"✅ تم ربط المحاكي بنجاح! المعرف: `{dev_id}`")
+            st.sidebar.success(f"✅ أهلاً بك {login_user} | الجهاز: {st.session_state.master_device_id}")
+            st.rerun()
         else:
-            st.warning("يرجى كتابة رقم الهاتف.")
-
-# 8. فحص التيليميتري
-elif menu.startswith("🔍"):
-    page_header("🔍 فحص وتحليل سجلات التيليميتري", "استعراض النقرات والاستجابات المسجلة.")
-    logs_df = query_db("SELECT * FROM myapp.bot_logs ORDER BY created_at DESC LIMIT 50")
-    if logs_df is not None and not logs_df.empty:
-        st.dataframe(logs_df, use_container_width=True)
-    else:
-        st.info("لا توجد سجلات تيليميتري مرصودة حالياً.")
-
-# 9. حالة السيرفر
+            st.sidebar.error("الرجاء إدخال بيانات الدخول ورقم الجهاز!")
+    st.stop()
 else:
-    page_header("🖥️ حالة السيرفر وقاعدة البيانات", "فحص استقرار قاعدة بيانات Neon.")
-    res = query_db("SELECT NOW() as db_time, COUNT(*) as users_count FROM myapp.users_status")
-    if res is not None and not res.empty:
-        st.success(f"🟢 قاعدة بيانات Neon متصلة وتعمل بكفاءة تامة! وقت السيرفر: {res.iloc[0]['db_time']}")
+    st.sidebar.markdown(f"👤 المستخدم الحالي: **{st.session_state.username}**")
+    st.sidebar.markdown(f"📱 معرف الجهاز المسجل: `🪪 {st.session_state.master_device_id}`")
+    if st.sidebar.button("تسجيل الخروج"):
+        st.session_state.authenticated = False
+        st.session_state.username = ""
+        st.session_state.is_master = False
+        st.session_state.master_device_id = ""
+        st.rerun()
+
+# القائمة الجانبية التنقلية
+st.sidebar.markdown("---")
+st.sidebar.markdown("## ⚡ MyClicker Admin Panel")
+menu = st.sidebar.radio(
+    "اختر القسم:",
+    [
+        "📊 نظرة عامة والتقارير",
+        "📦 المستودع والأكواد المتاحة",
+        "✅ الأكواد المستخدمة",
+        "🚀 تفعيل وتسكين كود لمستخدم",
+        "🛰️ مراقبة الأسطول وتهيئة الأجهزة",
+        "📋 سجل العمليات والتدقيق (Audit Logs)"
+    ]
+)
+
+# 1. نظرة عامة والتقارير
+if menu == "📊 نظرة عامة والتقارير":
+    st.title("📊 لوحة التحكم المركزية - نظرة عامة")
+    st.markdown(f"مرحباً بك **{st.session_state.username}** (الجهاز: `{st.session_state.master_device_id}`) في لوحة تحكم **MyClicker Pro 7.3.0**.")
+
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("📦 الأكواد المتاحة بالمستودع", len(st.session_state.available_codes))
+    with col2:
+        st.metric("✅ الأكواد المستخدمة والمفعمة", len(st.session_state.used_codes))
+    with col3:
+        st.metric("🛰️ الأجهزة النشطة بالأسطول", len(st.session_state.fleet_devices))
+    with col4:
+        st.metric("💰 إجمالي المبيعات (تقديري)", f"{len(st.session_state.used_codes) * 15} دينار")
+
+# 2. المستودع والأكواد المتاحة
+elif menu == "📦 المستودع والأكواد المتاحة":
+    st.title("📦 إدارة المستودع والأكواد المتاحة")
+    st.markdown("عرض الأكواد غير المستخدمة في المستودع مع حصر صلاحية **توليد الأكواد الجديدة للمالك (Master)** فقط وتسجيل رقم جهازه.")
+
+    if st.session_state.is_master:
+        with st.expander("➕ [خاص بالمالك Master] توليد وإضافة أكواد جديدة للمستودع", expanded=True):
+            col_a, col_b, col_c, col_d = st.columns(4)
+            with col_a:
+                code_prefix = st.text_input("بادئة الكود", "EMP")
+                code_days = st.selectbox("مدة الاشتراك", [7, 30, 90, 365])
+            with col_b:
+                code_tier = st.selectbox("نوع الفئة", ["STANDARD", "PRO", "VIP"])
+                code_count = st.number_input("العدد المطلوب توليده", 1, 50, 5)
+            with col_c:
+                vendor_name = st.text_input("تعيين للبائع / المسؤول", st.session_state.username)
+            with col_d:
+                st.markdown("<br>", unsafe_allow_html=True)
+                if st.button("توليد الأكواد وإضافتها"):
+                    new_rows = []
+                    for _ in range(code_count):
+                        rand_suffix = f"{datetime.now().microsecond:04d}"
+                        new_code = f"{code_prefix}-{code_days}D-{rand_suffix}"
+                        new_rows.append({
+                            "Code": new_code,
+                            "DurationDays": code_days,
+                            "Tier": code_tier,
+                            "Vendor": vendor_name,
+                            "CreatedAt": datetime.now().strftime("%Y-%m-%d %H:%M")
+                        })
+                    st.session_state.available_codes = pd.concat([st.session_state.available_codes, pd.DataFrame(new_rows)], ignore_index=True)
+                    
+                    new_audit = pd.DataFrame([{
+                        "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                        "Action": f"توليد {code_count} كود",
+                        "Code": "BATCH_GENERATE",
+                        "Device": st.session_state.master_device_id,
+                        "Operator": st.session_state.username
+                    }])
+                    st.session_state.audit_logs = pd.concat([st.session_state.audit_logs, new_audit], ignore_index=True)
+
+                    st.success(f"✅ تم توليد وإضافة {code_count} كود بنجاح بواسطة المالك (Device ID: {st.session_state.master_device_id})!")
+                    st.rerun()
     else:
-        st.error("تعذر الاتصال بقاعدة البيانات.")
+        st.warning("🔒 تنبيه: خاصية توليد الأكواد الجديدة محصورة بالمالك (Master) فقط.")
+
+    st.markdown("---")
+    st.subheader("📋 جدول الأكواد المتاحة في المستودع")
+    if not st.session_state.available_codes.empty:
+        search_query = st.text_input("🔍 بحث عن كود أو بائع", "")
+        df_display = st.session_state.available_codes
+        if search_query:
+            df_display = df_display[df_display.astype(str).apply(lambda x: x.str.contains(search_query, case=False)).any(axis=1)]
+        
+        st.dataframe(df_display, use_container_width=True)
+
+        selected_code_to_copy = st.selectbox("اختر كود للنسخ والتسجيل", ["-- اختر --"] + list(df_display["Code"]))
+        if selected_code_to_copy != "-- اختر --":
+            if st.button("📋 نسخ الكود وتسجيل اسم الناسخ ورقم جهازه"):
+                new_audit = pd.DataFrame([{
+                    "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                    "Action": "نسخ كود",
+                    "Code": selected_code_to_copy,
+                    "Device": st.session_state.master_device_id,
+                    "Operator": st.session_state.username
+                }])
+                st.session_state.audit_logs = pd.concat([st.session_state.audit_logs, new_audit], ignore_index=True)
+                st.success(f"✅ تم نسخ الكود `{selected_code_to_copy}` بواسطة `{st.session_state.username}` (Device: {st.session_state.master_device_id}) وتسجيل العملية رسمياً!")
+    else:
+        st.warning("المستودع فارغ!")
+
+# 3. الأكواد المستخدمة
+elif menu == "✅ الأكواد المستخدمة":
+    st.title("✅ سجل الأكواد المستخدمة والمفعلة")
+    if not st.session_state.used_codes.empty:
+        st.dataframe(st.session_state.used_codes, use_container_width=True)
+    else:
+        st.info("لا توجد أكواد مستخدمة مسجلة.")
+
+# 4. تفعيل وتسكين كود لمستخدم
+elif menu == "🚀 تفعيل وتسكين كود لمستخدم":
+    st.title("🚀 تفعيل جهاز كابتن وتسكين كود تلقائياً")
+    st.markdown("تفعيل اشتراك الكابتن عن طريق خصم كود تلقائياً من المستودع المتاح وربطه بجهازه ورقم هاتفه مع تسجيل رقم جهاز المسؤول.")
+
+    with st.form("activation_form"):
+        col1, col2 = st.columns(2)
+        with col1:
+            device_id_input = st.text_input("معرف الجهاز (Device ID للكابتن)", placeholder="مثال: d201451dda15bc31")
+            phone_input = st.text_input("رقم هاتف الكابتن", placeholder="مثال: +962770000000")
+        with col2:
+            operator_name = st.text_input("اسم المسؤول أو البائع المفعل", st.session_state.username)
+            specific_code = st.text_input("كود محدد (اختياري - اتركه فارغاً للخصم التلقائي من المستودع)", "")
+
+        submit_activation = st.form_submit_button("⚡ تنفيذ التفعيل التلقائي وخصم الكود")
+
+        if submit_activation:
+            if not device_id_input or not phone_input:
+                st.error("الرجاء إدخال معرف الجهاز ورقم الهاتف على الأقل!")
+            else:
+                target_code = ""
+                duration_to_add = 30
+                tier_to_add = "PRO"
+
+                if specific_code:
+                    if specific_code in list(st.session_state.available_codes["Code"]):
+                        row = st.session_state.available_codes[st.session_state.available_codes["Code"] == specific_code].iloc[0]
+                        target_code = row["Code"]
+                        duration_to_add = int(row["DurationDays"])
+                        tier_to_add = row["Tier"]
+                        st.session_state.available_codes = st.session_state.available_codes[st.session_state.available_codes["Code"] != specific_code]
+                    else:
+                        st.error("الكود المحدد غير موجود في المستودع المتاح!")
+                        target_code = None
+                else:
+                    if not st.session_state.available_codes.empty:
+                        row = st.session_state.available_codes.iloc[0]
+                        target_code = row["Code"]
+                        duration_to_add = int(row["DurationDays"])
+                        tier_to_add = row["Tier"]
+                        st.session_state.available_codes = st.session_state.available_codes.iloc[1:].reset_index(drop=True)
+                    else:
+                        st.error("المستودع خاوٍ تماماً! لا توجد أكواد متاحة للخصم التلقائي.")
+                        target_code = None
+
+                if target_code:
+                    expiry_date = (datetime.now() + pd.Timedelta(days=duration_to_add)).strftime("%Y-%m-%d")
+                    
+                    new_used = pd.DataFrame([{
+                        "Code": target_code,
+                        "DurationDays": duration_to_add,
+                        "Tier": tier_to_add,
+                        "Vendor": operator_name,
+                        "UsedByDevice": device_id_input,
+                        "Phone": phone_input,
+                        "UsedAt": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                        "Responsible": f"{operator_name} (Device: {st.session_state.master_device_id})"
+                    }])
+                    st.session_state.used_codes = pd.concat([st.session_state.used_codes, new_used], ignore_index=True)
+
+                    new_device = pd.DataFrame([{
+                        "DeviceId": device_id_input,
+                        "Phone": phone_input,
+                        "DeviceModel": "Android Device",
+                        "AppVersion": "7.3.0",
+                        "Status": "Active",
+                        "SubTier": tier_to_add,
+                        "ExpiryDate": expiry_date,
+                        "LastSeen": "الآن"
+                    }])
+                    st.session_state.fleet_devices = st.session_state.fleet_devices[st.session_state.fleet_devices["DeviceId"] != device_id_input]
+                    st.session_state.fleet_devices = pd.concat([st.session_state.fleet_devices, new_device], ignore_index=True)
+
+                    new_audit = pd.DataFrame([{
+                        "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                        "Action": "تفعيل مستخدم وتسكين كود",
+                        "Code": target_code,
+                        "Device": f"Captain: {device_id_input} | AdminDevice: {st.session_state.master_device_id}",
+                        "Operator": operator_name
+                    }])
+                    st.session_state.audit_logs = pd.concat([st.session_state.audit_logs, new_audit], ignore_index=True)
+
+                    st.success(f"✅ تم تفعيل الجهاز بنجاح! تم خصم الكود `{target_code}` وتسكينه للكابتن (بواسطة المسؤول بجهاز: {st.session_state.master_device_id}).")
+
+# 5. مراقبة الأسطول وتهيئة الأجهزة
+elif menu == "🛰️ مراقبة الأسطول وتهيئة الأجهزة":
+    st.title("🛰️ مراقبة الأسطول وتهيئة أجهزة الكباتن")
+    if not st.session_state.fleet_devices.empty:
+        st.dataframe(st.session_state.fleet_devices, use_container_width=True)
+
+        selected_dev = st.selectbox("اختر جهازاً لإدارة حالته", list(st.session_state.fleet_devices["DeviceId"]))
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            if st.button("❄️ تجميد الجهاز (Freeze)"):
+                st.session_state.fleet_devices.loc[st.session_state.fleet_devices["DeviceId"] == selected_dev, "Status"] = "Frozen"
+                st.success(f"تم تجميد الجهاز {selected_dev}")
+                st.rerun()
+        with col2:
+            if st.button("🔥 تفعيل الجهاز (Unfreeze/Active)"):
+                st.session_state.fleet_devices.loc[st.session_state.fleet_devices["DeviceId"] == selected_dev, "Status"] = "Active"
+                st.success(f"تم تفعيل الجهاز {selected_dev}")
+                st.rerun()
+        with col3:
+            if st.button("🗑️ إزالة الجهاز من الأسطول"):
+                st.session_state.fleet_devices = st.session_state.fleet_devices[st.session_state.fleet_devices["DeviceId"] != selected_dev]
+                st.success(f"تمت إزالة الجهاز {selected_dev}")
+                st.rerun()
+    else:
+        st.info("لا توجد أجهزة مسجلة.")
+
+# 6. سجل العمليات والتدقيق (Audit Logs)
+elif menu == "📋 سجل العمليات والتدقيق (Audit Logs)":
+    st.title("📋 سجل العمليات والتدقيق مع بصمة أجهزة المسؤولين")
+    if not st.session_state.audit_logs.empty:
+        st.dataframe(st.session_state.audit_logs, use_container_width=True)
+    else:
+        st.info("لا توجد سجلات مسجلة.")
